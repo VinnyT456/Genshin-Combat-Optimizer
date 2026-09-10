@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-surface text-slate-100 antialiased;
+  background-image: radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.04), transparent 50%);
+  background-attachment: fixed;
+}
+
+/*
+ * Every number a user compares column-to-column is mono. Locking tabular
+ * figures globally keeps damage/energy columns from jittering as values change.
+ */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sleek dark scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(13, 15, 23, 0.8);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(36, 42, 58, 0.9);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.5);
+}
+
+/* Touch targets must not wait 300ms or fire synthetic zoom. */
+button,
+[role="button"],
+a,
+input,
+select {
+  touch-action: manipulation;
+}
+
+/*
+ * Motion budget: only opacity and transform animate, max 150ms, and all of it
+ * is disabled when the user asks for reduced motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

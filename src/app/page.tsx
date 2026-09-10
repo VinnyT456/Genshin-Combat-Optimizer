@@ -1,0 +1,926 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { allCharacters, nationalRotation, nationalTeam, testEnemy } from "@/game-data";
+import { RotationTimeline } from "@/features/rotation-timeline/RotationTimeline";
+import { EventDetailPanel } from "@/features/rotation-timeline/EventDetailPanel";
+import { DamageBreakdown } from "@/features/damage-breakdown/DamageBreakdown";
+import { EnergyPanel } from "@/features/energy/EnergyPanel";
+import { TeamBuilder } from "@/features/team-builder/TeamBuilder";
+import {
+  type Team,
+  memberCount,
+  members,
+  orphanedActionCount,
+  referenceCharacterLevel,
+  resolveActiveId,
+  teamFrom,
+} from "@/features/team-builder/teamModel";
+import { EnemyConfigurator } from "@/features/setup/EnemyConfigurator";
+import { SimulationSettings } from "@/features/setup/SimulationSettings";
+import { RotationEditor } from "@/features/setup/RotationEditor";
+import { runSimulation } from "@/features/simulation/simulationAdapter";
+import { useUrlState } from "@/features/simulation/useUrlState";
+import {
+  EQUIPMENT_STORAGE_KEY,
+  type EquipmentSelections,
+  emptyEquipmentSelections,
+  parseSelections,
+  pruneSelections,
+  serializeSelections,
+} from "@/features/team-builder/equipmentSelection";
+import { findWeapon } from "@/game-data/weapons/registry";
+import { findArtifact } from "@/game-data/artifacts/registry";
+import type { AppView } from "@/features/simulation/urlState";
+import { generateRotationInsights } from "@/features/simulation/insightsModel";
+import { InsightsPanel } from "@/features/simulation/InsightsPanel";
+import {
+  createRun,
+  isRunStale,
+  type RunInputs,
+  type SimulationRun,
+} from "@/features/simulation/runState";
+import { resolveDashboardState } from "@/features/simulation/dashboardState";
+import { RotationSearchPanel } from "@/features/optimizer/RotationSearchPanel";
+import {
+  DEFAULT_SEARCH_DURATION_SECONDS,
+  runSearch,
+  scoreForObjective,
+  type OptimizationObjective,
+  type SearchBudget,
+  type SearchOutcome,
+} from "@/features/optimizer/optimizerAdapter";
+import type { SearchPhase } from "@/features/optimizer/searchPresentation";
+import { requestFingerprint } from "@/features/optimizer/searchState";
+import {
+  NO_ADOPTION,
+  adoptCandidate,
+  canRestore,
+  clearAdoptionOnManualEdit,
+  restoreIncumbent,
+  type AdoptionState,
+} from "@/features/optimizer/incumbentRotation";
+import { Section } from "@/components/ui/Section";
+import { Button } from "@/components/ui/Button";
+import { LiveRegion } from "@/components/ui/LiveRegion";
+import { cn } from "@/components/ui/cn";
+import {
+  FOCUS_RING,
+  STATE_CHIP,
+  STATE_TEXT,
+  TRANSITION_COLORS,
+} from "@/components/ui/tokens";
+import { elementBgClass, fmtNum } from "@/lib/format";
+import { MAIN_CONTENT_ID } from "@/components/ui/landmarks";
+import { detectResonances } from "@/features/team-builder/resonance";
+import { toWebsiteCharacter } from "@/features/team-builder/rosterModel";
+import type {
+  CharacterDefinition,
+  Element,
+  EnemyState,
+  Rotation,
+  SimulationConfig,
+} from "@/types";
+import {
+  charNameZh,
+  elementZh,
+  enemyNameZh,
+  resonanceNameZh,
+  resonanceShortDescZh,
+  resonanceFullDescZh,
+} from "@/lib/i18n";
+import { parseWorkspaceDraft, serializeWorkspaceDraft, workspaceDraftKey } from "@/features/simulation/workspacePersistence";
+
+// ---------------------------------------------------------------------------
+// Main page orchestration: holds team, enemy, rotation, and simulation config.
+// Consumes the simulation engine through simulationAdapter. No combat math here.
+// ---------------------------------------------------------------------------
+
+const EMPTY_TEAM_REASON = "请至少配置 1 位出战角色以进行战斗模拟。";
+const EMPTY_ROTATION_REASON = "请在动作时序流中添加至少 1 个动作。";
+const STALE_RESULT_NOTICE =
+  "配置参数已发生变化 — 下方结果仍对应执行模拟时的配置，请重新执行模拟以更新测算数据。";
+const STALE_RESULT_ANNOUNCEMENT =
+  "配置已变更，下方结果对应的是变更前的配置。";
+const SEARCH_BLOCKED_REASON = "请至少配置 1 位出战角色以搜索循环。";
+
+/** Accessible name for the segmented control that scopes the single page. */
+const VIEW_SWITCHER_LABEL = "工作区视图";
+
+/**
+ * The three scopes of the single-page workspace, in visual order.
+ *
+ * This product is ONE page: these switch which regions of it are shown, and
+ * the choice is mirrored into `?view=` so a scope stays shareable.
+ */
+const VIEW_OPTIONS: readonly { view: AppView; label: string }[] = [
+  { view: "all", label: "全部总览" },
+  { view: "setup", label: "战术配置" },
+  { view: "results", label: "数据看板" },
+];
+
+export default function Home() {
+  // The displayed result is stored as a RUN — a result permanently bound to the
+  // inputs that produced it (`runState.ts`). Every result region below reads
+  // `run.inputs`, never the live editor state, so editing the team cannot
+  // relabel numbers that were computed for a different team (UX-005).
+  const [run, setRun] = useState<SimulationRun | null>(null);
+
+  // Initial team: Raiden National Team
+  const roster = useMemo(
+    () => allCharacters.map(toWebsiteCharacter),
+    [],
+  );
+  const [team, setTeam] = useState<Team>(() => {
+    return teamFrom(
+      nationalTeam.flatMap((preset) => {
+        const character = roster.find((candidate) => candidate.id === preset.id);
+        return character === undefined ? [] : [character];
+      }),
+    );
+  });
+  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
+
+  // Simulation & Setup state
+  const [enemy, setEnemy] = useState<EnemyState>(testEnemy);
+  const [rotation, setRotation] = useState<Rotation>(nationalRotation);
+  const [simConfig, setSimConfig] = useState<Partial<SimulationConfig>>({
+    critMode: "expected",
+    swapCost: 0.6,
+  });
+
+  const [announcement, setAnnouncement] = useState("");
+  // Rotation search state. `adoption` preserves the hand-authored rotation so
+  // adopting a suggestion is always reversible (`incumbentRotation.ts`).
+  const [searchPhase, setSearchPhase] = useState<SearchPhase>("idle");
+  const [searchBudget, setSearchBudget] = useState<SearchBudget>("balanced");
+  const [searchObjective, setSearchObjective] =
+    useState<OptimizationObjective>("total-damage");
+  const [searchDuration, setSearchDuration] = useState(
+    DEFAULT_SEARCH_DURATION_SECONDS,
+  );
+  const [searchOutcome, setSearchOutcome] = useState<SearchOutcome | null>(null);
+  const [searchRequestSummary, setSearchRequestSummary] = useState<string | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [searchRequestFingerprint, setSearchRequestFingerprint] = useState<string | null>(null);
+  const searchRunIdRef = useRef(0);
+  const [adoption, setAdoption] = useState<AdoptionState>(NO_ADOPTION);
+  const [selectedEventIndex, setSelectedEventIndex] = useState<number | null>(null);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  /**
+   * The team's equipment choices.
+   *
+   * Owned HERE and not by `TeamBuilder`, because this is the component that
+   * calls `runSimulation`. While the choices lived inside the builder nothing
+   * could hand them to the adapter, so weapon passives and artifact set
+   * bonuses — both fully implemented and tested on the engine side — reached
+   * the engine for no build the user could construct.
+   */
+  const [equipment, setEquipment] = useState<EquipmentSelections>(
+    emptyEquipmentSelections,
+  );
+  // Team and view live in the URL so a configuration is shareable and
+  // bookmarkable, and Back/Forward moves between configurations.
+  const { state: urlState, push: pushUrlState, hydrated: urlHydrated } = useUrlState();
+  const view: AppView = urlState.view;
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(workspaceDraftKey());
+      const saved = raw === null ? null : parseWorkspaceDraft(raw);
+      if (saved !== null) { setTeam(saved.team.map((savedCharacter) => savedCharacter === null ? null : { ...(roster.find((candidate) => candidate.id === savedCharacter.id) ?? {}), ...savedCharacter } as CharacterDefinition)); setEnemy(saved.enemy); setRotation(saved.rotation); setSimConfig(saved.simConfig); setSearchBudget(saved.searchBudget as SearchBudget); setSearchObjective(saved.searchObjective as OptimizationObjective); setSearchDuration(saved.searchDuration); }
+      // Restored from its own key rather than the workspace draft: equipment
+      // is optional state whose absence must never invalidate a saved team.
+      setEquipment(
+        parseSelections(
+          window.sessionStorage.getItem(EQUIPMENT_STORAGE_KEY),
+          (id) => findWeapon(id) !== undefined,
+          (id) => findArtifact(id) !== undefined,
+        ),
+      );
+    } finally { setDraftHydrated(true); }
+  }, [roster]);
+  useEffect(() => {
+    if (!draftHydrated) return;
+    window.sessionStorage.setItem(workspaceDraftKey(), serializeWorkspaceDraft({ team, enemy, rotation, simConfig, searchBudget, searchObjective, searchDuration }));
+  }, [draftHydrated, team, enemy, rotation, simConfig, searchBudget, searchObjective, searchDuration]);
+  useEffect(() => {
+    if (!draftHydrated) return;
+    window.sessionStorage.setItem(
+      EQUIPMENT_STORAGE_KEY,
+      serializeSelections(equipment),
+    );
+  }, [draftHydrated, equipment]);
+
+  const setView = useCallback(
+    (nextView: AppView) => {
+      pushUrlState({ ...urlState, view: nextView });
+    },
+    [urlState, pushUrlState],
+  );
+
+  // Adopt the team encoded in the URL. Runs on first load and on Back/Forward
+  // (both surface as a new `urlState`). Ids that no longer exist in the roster
+  // resolve to an empty slot rather than blanking the whole team.
+  useEffect(() => {
+    if (!urlHydrated) return;
+    const encoded = urlState.team;
+    if (encoded.every((id) => id === null)) return;
+    setTeam((current) => {
+      const next = encoded.map((id, index) =>
+        id === null ? null : ({ ...(roster.find((c) => c.id === id) ?? {}), ...(current[index]?.id === id ? current[index] : {}) } as CharacterDefinition),
+      );
+      const sameAsCurrent =
+        next.length === current.length &&
+        next.every((c, i) => (c?.id ?? null) === (current[i]?.id ?? null));
+      return sameAsCurrent ? current : next;
+    });
+  }, [urlState.team, urlHydrated, roster]);
+
+  const teamMembers = useMemo(() => members(team), [team]);
+  const count = memberCount(team);
+  const resonances = useMemo(() => detectResonances(team), [team]);
+
+  // The inputs a run would be made from right now.
+  // `equipment` is included because `handleSimulate` runs WITH it: an input the
+  // run carries but the live comparison omits makes every fresh result report
+  // itself stale, and an input the run omits but the engine reads makes a
+  // changed build report itself current. Both are the same defect from
+  // opposite sides, so the two objects are built from one list of inputs.
+  const liveInputs: RunInputs = useMemo(
+    () => ({ team: teamMembers, rotation, enemy, config: simConfig, equipment }),
+    [teamMembers, rotation, enemy, simConfig, equipment],
+  );
+
+  // Staleness is DERIVED by comparing fingerprints, not stored as a flag that
+  // every edit handler must remember to set. A comparison cannot be forgotten
+  // when a new input control is added.
+  const resultStale = useMemo(
+    () => isRunStale(run, liveInputs),
+    [run, liveInputs],
+  );
+
+  // `resolveDashboardState` already encoded this branch table and was fully
+  // tested, but nothing rendered it — the page reimplemented the logic inline.
+  // Wiring it here removes the duplicate rather than adding a third copy.
+  const dashboard = useMemo(
+    () =>
+      resolveDashboardState({
+        memberCount: count,
+        rotationLength: rotation.length,
+        hasResult: run !== null,
+        resultStale,
+      }),
+    [count, rotation.length, run, resultStale],
+  );
+  const canSimulate = dashboard.canSimulate;
+
+  const orphaned = useMemo(
+    () => orphanedActionCount(team, rotation.map((a) => a.characterId)),
+    [team, rotation],
+  );
+
+  const resolvedActiveId = resolveActiveId(team, activeCharacterId);
+
+  const elementalShares = useMemo(() => {
+    if (!run || run.result.totalDamage <= 0) return [];
+    const total = run.result.totalDamage;
+    return Object.entries(run.result.damageByElement)
+      .map(([element, damage]) => ({
+        element,
+        damage,
+        pct: damage / total,
+      }))
+      .filter((e) => e.damage > 0)
+      .sort((a, b) => b.damage - a.damage);
+  }, [run]);
+
+  const charactersById = useMemo(() => {
+    const map = new Map<string, CharacterDefinition>();
+    for (const c of roster) {
+      map.set(c.id, c);
+    }
+    return map;
+  }, [roster]);
+
+  // Insights describe the RUN, so they are generated from the run's own team.
+  // Reading the live team here would attribute an old rotation's findings to a
+  // team that never produced them.
+  const insights = useMemo(() => {
+    if (!run) return [];
+    return generateRotationInsights(run.result, run.inputs.team);
+  }, [run]);
+
+  // Edit handlers no longer flag staleness; `resultStale` is derived. They only
+  // update inputs, which keeps each one a single obvious responsibility.
+  const handleTeamChange = useCallback(
+    (nextTeam: Team) => {
+      setTeam(nextTeam);
+      // Selections are keyed by character id, so a removed character's gear
+      // would otherwise persist invisibly and reappear on re-add. Pruned on
+      // team change rather than on render, which would fight the picker.
+      setEquipment((current) =>
+        pruneSelections(
+          current,
+          nextTeam.filter((c): c is CharacterDefinition => c !== null).map((c) => c.id),
+        ),
+      );
+      pushUrlState({
+        ...urlState,
+        team: nextTeam.map((c) => c?.id ?? null),
+      });
+    },
+    [urlState, pushUrlState],
+  );
+
+  const handleEnemyChange = useCallback((nextEnemy: EnemyState) => {
+    setEnemy(nextEnemy);
+  }, []);
+
+  const handleRotationChange = useCallback((nextRotation: Rotation) => {
+    setRotation(nextRotation);
+    // A hand edit means the editor no longer holds the adopted candidate, so
+    // the restore offer must go — restoring would overwrite the fresh edit.
+    setAdoption(clearAdoptionOnManualEdit());
+  }, []);
+
+  const handleConfigChange = useCallback(
+    (nextConfig: Partial<SimulationConfig>) => {
+      setSimConfig(nextConfig);
+    },
+    [],
+  );
+
+  // Announce staleness when it appears, rather than from inside each edit
+  // handler. One effect replaces four scattered announcement call sites.
+  useEffect(() => {
+    if (resultStale) setAnnouncement(STALE_RESULT_ANNOUNCEMENT);
+  }, [resultStale]);
+
+  const handleSimulate = useCallback(() => {
+    if (!canSimulate) return;
+    const inputs: RunInputs = {
+      team: teamMembers,
+      rotation,
+      enemy,
+      config: simConfig,
+      equipment,
+    };
+    const output = runSimulation(inputs);
+    setRun(createRun(inputs, output.result, output.swapCostIsDefault));
+    setSelectedEventIndex(null);
+    setAnnouncement(
+      `模拟计算完成。总伤害 ${fmtNum(output.result.totalDamage)}，循环总耗时 ` +
+        `${output.result.duration.toFixed(2)} 秒。`,
+    );
+  }, [canSimulate, teamMembers, rotation, enemy, simConfig, equipment]);
+
+  // --- Rotation search -----------------------------------------------------
+
+  const searchBlockedReason = count > 0 ? null : SEARCH_BLOCKED_REASON;
+  const liveSearchFingerprint = useMemo(
+    () => requestFingerprint({ team: teamMembers, enemy, objective: searchObjective, duration: searchDuration, budget: searchBudget, config: simConfig }),
+    [teamMembers, enemy, searchObjective, searchDuration, searchBudget, simConfig],
+  );
+
+  const handleSearch = useCallback(() => {
+    if (searchBlockedReason !== null) return;
+    const runId = ++searchRunIdRef.current;
+    setSearchRequestFingerprint(liveSearchFingerprint);
+    setSearchRequestSummary(
+      `当前阵容与配置 · ${enemyNameZh(enemy.name)} · ${searchObjective === "dps" ? "秒伤 (DPS)" : "总伤害"} · ${searchDuration}秒 · ${searchBudget === "fast" ? "快速" : searchBudget === "thorough" ? "深入" : "均衡"}`,
+    );
+    setSelectedCandidateId(null);
+    setSearchPhase("searching");
+    // The search is synchronous and blocks the main thread. Yielding first lets
+    // the "searching" state paint, so the UI is never silently frozen with a
+    // stale label. When the search moves into a worker this becomes the
+    // message boundary rather than a timeout, with no change to the UI shape.
+    window.setTimeout(() => {
+      if (runId !== searchRunIdRef.current) return;
+      const outcome = runSearch({
+        team: teamMembers,
+        enemy,
+        budget: searchBudget,
+        objective: searchObjective,
+        durationSeconds: searchDuration,
+        config: simConfig,
+      });
+      setSearchOutcome(outcome);
+      setSearchPhase(outcome.candidates.length > 0 ? "results" : "empty");
+      setAnnouncement(
+        outcome.candidates.length > 0
+          ? `循环搜索完成，找到 ${outcome.candidates.length} 个候选循环。`
+          : "循环搜索完成，未找到候选循环。",
+      );
+    }, 0);
+  }, [
+    searchBlockedReason,
+    teamMembers,
+    enemy,
+    searchBudget,
+    searchObjective,
+    searchDuration,
+    simConfig,
+    liveSearchFingerprint,
+  ]);
+
+  const handleSelectCandidate = useCallback((candidateId: string) => {
+    setSelectedCandidateId((current) => current === candidateId ? null : candidateId);
+  }, []);
+
+  const handleAdopt = useCallback(
+    (candidate: Rotation, rank: number) => {
+      const transition = adoptCandidate(rotation, candidate, rank, adoption);
+      setRotation(transition.rotation);
+      setAdoption(transition.adoption);
+      setAnnouncement(`已将候选循环 #${rank} 复制到动作时序编辑器，原循环已保留。`);
+    },
+    [rotation, adoption],
+  );
+
+  const handleRestoreIncumbent = useCallback(() => {
+    const transition = restoreIncumbent(adoption);
+    if (transition === null) return;
+    setRotation(transition.rotation);
+    setAdoption(transition.adoption);
+    setAnnouncement("已还原为搜索前的原循环。");
+  }, [adoption]);
+
+  // The user's own rotation is the baseline a candidate is compared against.
+  // Only a FRESH run qualifies: a stale run describes different inputs, so
+  // presenting it as the baseline would compare against the wrong rotation.
+  const baselineScore = useMemo(() => {
+    if (run === null || resultStale) return null;
+    return scoreForObjective(run.result, searchObjective);
+  }, [run, resultStale, searchObjective]);
+
+  // Keyboard shortcut: Cmd/Ctrl + Enter to trigger simulation
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleSimulate();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSimulate]);
+
+  // Copy rotation summary to clipboard.
+  //
+  // Every field comes from `run.inputs`, never from live state. This function
+  // was the clearest instance of the UX-005 defect: it read the live enemy,
+  // live team and live rotation length, so copying a summary after editing the
+  // team produced a report whose header described one team and whose damage
+  // numbers came from another.
+  function handleCopySummary() {
+    if (!run) return;
+    const { result, inputs } = run;
+    const summaryText = [
+      `=== 原神战斗循环模拟器 测算报告 ===`,
+      `出战阵容: ${inputs.team.map((c) => `${charNameZh(c.name)} (${elementZh(c.element)})`).join(", ")}`,
+      `目标敌人: ${enemyNameZh(inputs.enemy.name)} (Lv ${inputs.enemy.level}, 基础全抗性 ${((inputs.enemy.resistances.pyro ?? 0.1) * 100).toFixed(0)}%)`,
+      `总伤害: ${fmtNum(result.totalDamage)}`,
+      `秒伤 (DPS): ${fmtNum(result.dps)}`,
+      `循环耗时: ${result.duration.toFixed(2)} 秒`,
+      `平均切人耗时: ${result.effectiveSwapCost.toFixed(2)} 秒`,
+      `执行动作数: ${inputs.rotation.length} 步`,
+      result.warnings.length > 0 ? `模拟提示: ${result.warnings.join("; ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    navigator.clipboard.writeText(summaryText).then(() => {
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2500);
+    });
+  }
+
+  const showSetup = view === "all" || view === "setup";
+  const showResults = view === "all" || view === "results";
+
+  return (
+    <main id={MAIN_CONTENT_ID} className="mx-auto max-w-7xl px-4 py-10 sm:px-8 space-y-12">
+      {/* Top Header */}
+      <header className="border-b border-surface-border/60 pb-6 space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">
+              原神战斗循环模拟器
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              精确伤害计算 · 循环轴时序分析 · 充能自循环校验
+            </p>
+          </div>
+        </div>
+
+        {/* Global Telemetry Ribbon & View Switcher */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border/80 bg-surface-raised/50 px-4 py-2.5 text-xs text-slate-300">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              <span className="text-slate-400">出战席位:</span>
+              <span className="font-semibold text-slate-200">
+                <span className="font-mono tabular-nums">{count}/4</span> 角色
+              </span>
+            </div>
+            {resonances.length > 0 && (
+              <>
+                <span className="text-slate-600">·</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">元素共鸣:</span>
+                  <div className="flex items-center gap-1">
+                    {resonances.map((r) => (
+                      <span
+                        key={r.id}
+                        className="rounded bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 text-xs text-amber-300 font-medium"
+                        title={resonanceFullDescZh(r.name) || r.fullDesc}
+                      >
+                        {resonanceNameZh(r.name)} ({resonanceShortDescZh(r.name) || r.shortDesc})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+            <span className="text-slate-600">·</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">目标:</span>
+              <span className="font-semibold text-slate-200">{enemyNameZh(enemy.name)}</span>
+                        <span className="font-mono text-slate-400">（等级 {enemy.level}）</span>
+            </div>
+            <span className="text-slate-600">·</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">动作序列:</span>
+              <span className="font-semibold text-amber-400">
+                <span className="font-mono tabular-nums">{rotation.length}</span> 步
+              </span>
+            </div>
+          </div>
+
+          {/*
+            Segmented view switcher. With the routed shell gone this is the
+            page's only navigation control, so the selected view is exposed via
+            `aria-pressed` rather than by colour alone, and the group carries a
+            name. Previously three hand-copied buttons; the states now come
+            from one table so a new view cannot ship with a different style.
+          */}
+          <div
+            role="group"
+            aria-label={VIEW_SWITCHER_LABEL}
+            className="inline-flex rounded-md border border-surface-border bg-surface p-0.5 text-xs"
+          >
+            {VIEW_OPTIONS.map((option) => {
+              const selected = view === option.view;
+              return (
+                <button
+                  key={option.view}
+                  type="button"
+                  onClick={() => setView(option.view)}
+                  aria-pressed={selected}
+                  className={cn(
+                    "rounded px-3 py-1 font-semibold",
+                    TRANSITION_COLORS,
+                    FOCUS_RING,
+                    selected
+                      ? "bg-amber-500 text-slate-950 shadow-sm"
+                      : "text-slate-400 hover:text-slate-200",
+                  )}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </header>
+
+      {/* 1. Team Builder Section */}
+      {showSetup && (
+        <>
+          <Section title="队伍阵容配置" id="team-heading">
+            <TeamBuilder
+              roster={roster}
+              team={team}
+              onTeamChange={handleTeamChange}
+              activeCharacterId={resolvedActiveId}
+              onSetActive={setActiveCharacterId}
+              // Only a FRESH run may annotate the live team's slots. The
+              // builder maps per-character damage shares onto the team it is
+              // rendering; feeding it a stale run would attribute one team's
+              // damage to another team's portraits.
+              result={resultStale ? null : (run?.result ?? null)}
+              orphanedActionCount={orphaned}
+              equipment={equipment}
+              onEquipmentChange={setEquipment}
+            />
+          </Section>
+
+          {/* 2. Setup Section: Configurable Enemy, Sim Settings & Rotation Editor */}
+          <Section title="战斗环境与动作时序编排" id="setup-heading">
+            <div className="grid gap-6 lg:grid-cols-12">
+              {/* Left Column: Target Enemy & Sim Parameters */}
+              <div className="flex flex-col gap-6 lg:col-span-4">
+                <EnemyConfigurator
+                enemy={enemy}
+                onChange={handleEnemyChange}
+                referenceLevel={referenceCharacterLevel(team)}
+              />
+                <SimulationSettings config={simConfig} onChange={handleConfigChange} />
+              </div>
+
+              {/* Right Column: Interactive Rotation Sequencer */}
+              <div className="lg:col-span-8">
+                <RotationEditor
+                  rotation={rotation}
+                  onRotationChange={handleRotationChange}
+                  team={team}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* 2b. Rotation search: bounded budgets, Top-N suggestions, adopt. */}
+          <Section title="循环搜索" id="search-heading">
+            <RotationSearchPanel
+              phase={searchPhase}
+              budget={searchBudget}
+              objective={searchObjective}
+              durationSeconds={searchDuration}
+              outcome={searchOutcome}
+              baselineScore={baselineScore}
+              blockedReason={searchBlockedReason}
+              canRestore={canRestore(adoption)}
+              adoptedRank={adoption.adoptedRank}
+              selectedCandidateId={selectedCandidateId}
+              requestSummary={searchRequestSummary}
+              draftChanged={searchRequestFingerprint !== null && searchRequestFingerprint !== liveSearchFingerprint}
+              team={teamMembers}
+              onBudgetChange={setSearchBudget}
+              onObjectiveChange={setSearchObjective}
+              onDurationChange={setSearchDuration}
+              onSearch={handleSearch}
+              onAdopt={handleAdopt}
+              onSelectCandidate={handleSelectCandidate}
+              onRestore={handleRestoreIncumbent}
+            />
+          </Section>
+        </>
+      )}
+
+      {/* 3. Simulation Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-surface-border/80 bg-surface-raised/80 p-5 shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-4">
+          <Button
+            size="md"
+            variant="primary"
+            onClick={handleSimulate}
+            disabled={!canSimulate}
+            className="tracking-wide"
+          >
+            执行循环模拟
+          </Button>
+
+          <div className="hidden text-xs text-slate-400 sm:flex items-center gap-1.5">
+            <kbd className="rounded border border-surface-border bg-surface px-1.5 py-0.5 font-mono text-slate-300">⌘</kbd>
+            <span>+</span>
+            <kbd className="rounded border border-surface-border bg-surface px-1.5 py-0.5 font-mono text-slate-300">↵</kbd>
+            <span className="text-slate-400">快捷执行</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs">
+          {!canSimulate ? (
+            <span className="text-amber-400 font-medium">
+              {count === 0 ? EMPTY_TEAM_REASON : EMPTY_ROTATION_REASON}
+            </span>
+          ) : (
+            <span className="text-slate-400">
+              就绪 · 点击运行模拟获取伤害与充能数据
+            </span>
+          )}
+        </div>
+      </div>
+
+      <LiveRegion message={announcement} />
+
+      {/* Stale Result Banner */}
+      {resultStale && (
+        <Section title="测算状态提示" id="stale-heading">
+          <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-xl border p-4 text-sm", STATE_CHIP.info)}>
+            <div className="flex items-center gap-2 font-mono">
+              <span aria-hidden="true">◇</span>
+              <span>{STALE_RESULT_NOTICE}</span>
+            </div>
+            <Button size="sm" variant="primary" onClick={handleSimulate} disabled={!canSimulate}>
+              重新执行战斗模拟
+            </Button>
+          </div>
+        </Section>
+      )}
+
+      {/* 4. Results Section */}
+      {showResults && run === null && view === "results" && (
+        <div className="rounded-xl border border-surface-border bg-surface-raised/40 p-10 text-center font-mono space-y-2">
+          <p className="text-slate-200 text-sm font-semibold">
+            尚未生成模拟结果
+          </p>
+          <p className="text-slate-400 text-xs">
+            请点击上方「执行循环模拟」按钮以生成实战数据看板、能量分析与战术洞察。
+          </p>
+        </div>
+      )}
+
+      {showResults && run !== null && (
+        <>
+          <Section
+            title="核心输出数据看板"
+            id="result-heading"
+          >
+            <div className="space-y-6">
+              {/* Primary Stats Grid */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Stat
+                  label="总伤害"
+                  value={fmtNum(run.result.totalDamage)}
+                  description="循环中所有技能造成的伤害总和"
+                />
+                <Stat
+                  label="秒伤 (DPS)"
+                  value={fmtNum(run.result.dps)}
+                  description="循环总耗时内的平均每秒伤害"
+                />
+                <Stat
+                  label="循环总耗时"
+                  value={`${run.result.duration.toFixed(2)} 秒`}
+                  description="涵盖技能施法前摇、后摇与切人耗时"
+                />
+                <Stat
+                  label="切人后摇耗时"
+                  value={`${run.result.effectiveSwapCost.toFixed(2)} 秒 / 次`}
+                  description={
+                    run.swapCostIsDefault
+                      ? "本次模拟采用引擎默认切人耗时"
+                      : "本次模拟采用自定义切人延迟参数"
+                  }
+                />
+              </div>
+
+              {/* Elemental Damage Distribution Bar */}
+              {elementalShares.length > 0 && (
+                <div className="rounded-xl border border-surface-border/80 bg-surface-raised/60 p-4 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">元素伤害分布:</span>
+                    <span className="font-mono text-xs text-slate-400">
+                      {elementalShares.map((e) => `${elementZh(e.element)} ${(e.pct * 100).toFixed(1)}%`).join(" · ")}
+                    </span>
+                  </div>
+                  <div className="flex h-3 w-full overflow-hidden rounded-full bg-surface-raised ring-1 ring-surface-border">
+                    {elementalShares.map((e) => (
+                      <div
+                        key={e.element}
+                        className={cn(
+                          "h-full transition-[width] duration-150",
+                          elementBgClass(e.element as Element),
+                        )}
+                        style={{ width: `${e.pct * 100}%` }}
+                        title={`${elementZh(e.element)}: ${fmtNum(e.damage)} (${(e.pct * 100).toFixed(1)}%)`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Real Tactical Insights Panel */}
+              <InsightsPanel insights={insights} />
+
+              {/* Utility action: Copy summary */}
+              <div className="flex items-center justify-end">
+                <Button size="sm" variant="quiet" onClick={handleCopySummary} className="font-mono text-micro">
+                  {copiedSummary ? "✓ 测算摘要已复制到剪贴板！" : "复制循环摘要"}
+                </Button>
+              </div>
+
+              {/* Warnings & Errors */}
+              {run.result.warnings.length > 0 && (
+                <div className="rounded-md border border-state-warning-border bg-state-warning-bg p-3 font-mono">
+                  <div className="mb-1 text-xs font-semibold text-state-warning-fg">
+                    模拟提示 ({run.result.warnings.length})
+                  </div>
+                  <ul className="space-y-1 text-xs">
+                    {run.result.warnings.map((w, i) => (
+                      <li key={i} className={STATE_TEXT.warning}>
+                        <span aria-hidden="true">⚠ </span>
+                        {w}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {run.result.errors.length > 0 && (
+                <div className="rounded-md border border-state-error-border bg-state-error-bg p-3 font-mono" role="alert">
+                  <div className="mb-1 text-xs font-semibold text-state-error-fg">
+                    模拟错误 ({run.result.errors.length})
+                  </div>
+                  <ul className="space-y-1 text-xs">
+                    {run.result.errors.map((e, i) => (
+                      <li key={i} className={STATE_TEXT.error}>
+                        <span aria-hidden="true">✕ </span>
+                        {e}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {/* 5. Energy Kinetics Section */}
+          <Section title="能量微粒流转" id="energy-heading">
+            <EnergyPanel
+              team={run.inputs.team}
+              timeline={run.result.timeline}
+              finalState={run.result.finalState}
+              selectedEventIndex={selectedEventIndex}
+              onSelectEvent={setSelectedEventIndex}
+            />
+          </Section>
+
+          {/* 6. Timeline & Event Detail Panel */}
+          <Section title="动作时序与换人节奏" id="timeline-heading">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <RotationTimeline
+                timeline={run.result.timeline}
+                duration={run.result.duration}
+                team={run.inputs.team}
+                warnings={run.result.structuredWarnings}
+                effectiveSwapCost={run.result.effectiveSwapCost}
+                swapCostIsDefault={run.swapCostIsDefault}
+                selectedEventIndex={selectedEventIndex}
+                onSelectEvent={setSelectedEventIndex}
+              />
+              <EventDetailPanel
+                event={
+                  selectedEventIndex === null
+                    ? null
+                    : (run.result.timeline[selectedEventIndex] ?? null)
+                }
+                charactersById={charactersById}
+                totalDamage={run.result.totalDamage}
+              />
+            </div>
+          </Section>
+
+          {/* 7. Damage Breakdown Section */}
+          <Section title="伤害多维拆解" id="breakdown-heading">
+            <DamageBreakdown result={run.result} team={run.inputs.team} />
+          </Section>
+        </>
+      )}
+
+      {/* Sleek Minimal Footer */}
+      <footer className="mt-16 border-t border-surface-border py-6 font-mono text-xs text-slate-400 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          原神战斗输出循环模拟器 · 确定性战斗内核与时序编排
+        </div>
+        <div className="flex items-center gap-3">
+          <span>原神 Wiki 战斗伤害公式标准</span>
+          <span>·</span>
+          <span>能量动力学流转</span>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: string;
+  description?: string;
+}) {
+  return (
+    <div className="relative flex flex-col justify-between rounded-xl border border-surface-border/80 bg-surface-raised/80 p-5 shadow-sm transition-colors hover:border-slate-500">
+      <div>
+        <div className="text-xs font-medium text-slate-400">
+          {label}
+        </div>
+        <div className="mt-2 font-mono text-3xl sm:text-4xl font-black tracking-tight text-white">
+          {value}
+        </div>
+      </div>
+      {description && (
+        <div className="mt-3 border-t border-surface-border/50 pt-2 text-xs text-slate-400 leading-relaxed">
+          {description}
+        </div>
+      )}
+    </div>
+  );
+}
+

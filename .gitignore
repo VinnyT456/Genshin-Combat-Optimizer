@@ -1,0 +1,13 @@
+node_modules
+.next
+out
+dist
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+
+# Python bytecode from the data generators.
+__pycache__/
+*.pyc
+.cache/
+*.tsbuildinfo
