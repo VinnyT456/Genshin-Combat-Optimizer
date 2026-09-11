@@ -4,6 +4,11 @@ import {
   applyEquipment,
   type EquipmentStat,
 } from "@/features/simulation/simulationAdapter";
+import {
+  findWeaponBaseAtkAtLevel,
+  findWeaponStatsAtLevel,
+} from "@/game-data/weapons/registry";
+import { DEFAULT_WEAPON_LEVEL } from "@/features/team-builder/equipmentSelection";
 
 export type WeaponRarityFilter = "all" | WeaponRarity;
 
@@ -93,11 +98,31 @@ function toEquipmentStat(subStat: WeaponDefinition["subStat"]): EquipmentStat | 
  * the failure mode this project has been burned by, so no default is supplied
  * here. A stat the character does not have simply stays absent.
  */
-export function applyWeaponStats(baseStats: Stats, weapon: WeaponDefinition): Stats {
-  const substat = toEquipmentStat(weapon.subStat);
+export function applyWeaponStats(
+  baseStats: Stats,
+  weapon: WeaponDefinition,
+  weaponLevel = DEFAULT_WEAPON_LEVEL,
+): Stats {
+  // Generated weapons carry exact per-level values. Synthetic test weapons
+  // keep using their catalog values, which represent level 90.
+  const sourced = findWeaponStatsAtLevel(weapon.id, weaponLevel);
+  const generatedBaseAtk = findWeaponBaseAtkAtLevel(weapon.id, weaponLevel);
+  const baseAtk =
+    sourced?.baseAtk ??
+    generatedBaseAtk ??
+    weapon.baseAtk;
+  // A known generated weapon with a missing substat row must omit that
+  // secondary stat. Unknown synthetic fixtures have no generated curve, so
+  // retain their authored catalog substat for backwards-compatible tests and
+  // custom definitions.
+  const substat = sourced
+    ? toEquipmentStat(sourced.subStat)
+    : generatedBaseAtk === undefined
+      ? toEquipmentStat(weapon.subStat)
+      : null;
   return applyEquipment(baseStats, {
     weapon: {
-      baseAtk: weapon.baseAtk,
+      baseAtk,
       ...(substat === null ? {} : { substat }),
     },
   }).stats;

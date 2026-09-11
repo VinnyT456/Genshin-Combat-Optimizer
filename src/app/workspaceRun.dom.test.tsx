@@ -188,8 +188,9 @@ describe("workspace labels a stale result with the run's own inputs", () => {
 
     // Empty slot 1. The result now describes a team the page no longer shows.
     const slot = screen.getByLabelText(/^1 号位：/);
+    const editor = within(slot).getByRole("button", { name: /编辑.*角色配置/ });
     await act(async () => {
-      fireEvent.keyDown(slot, { key: "Delete" });
+      fireEvent.keyDown(editor, { key: "Delete" });
     });
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: STALE_SECTION })).toBeInTheDocument(),
@@ -207,8 +208,12 @@ describe("workspace labels a stale result with the run's own inputs", () => {
     await renderWorkspace();
     await runSimulation();
 
+    const slot = screen.getByLabelText(/^1 号位：/);
     await act(async () => {
-      fireEvent.keyDown(screen.getByLabelText(/^1 号位：/), { key: "Delete" });
+      fireEvent.keyDown(
+        within(slot).getByRole("button", { name: /编辑.*角色配置/ }),
+        { key: "Delete" },
+      );
     });
 
     // Still rendered, still showing the previous run's dashboard.

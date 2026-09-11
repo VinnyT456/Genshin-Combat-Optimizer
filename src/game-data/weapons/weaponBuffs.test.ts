@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Rotation, SimulationConfig } from "@/types";
+import type { CharacterDefinition, Rotation, SimulationConfig } from "@/types";
 import type { EquipmentBuffsByCharacter } from "@/simulation/engine/equipmentBuffs";
 import { harvestWeaponPassiveBuffs } from "@/simulation/engine/equipmentBuffs";
+import { getActiveBuffs } from "@/simulation/buffs/getActiveBuffs";
 import { simulateRotation } from "@/simulation/engine/simulateRotation";
 import { testPyro } from "@/game-data/characters/testPyro";
 import { testEnemy } from "@/game-data/enemies/testEnemy";
@@ -45,6 +46,9 @@ const RUST = "rust";
 const THE_CATCH = "thecatch";
 /** Redhorn Stonethresher: unscoped DEF%, plus a Normal/Charged-scoped conversion. */
 const REDHORN = "redhornstonethresher";
+/** Staff of Homa: unconditional HP + HP->ATK, plus a below-half-HP add-on. */
+const HOMA = "staffofhoma";
+const MISTSPLITTER = "mistsplitterreforged";
 
 const NORMAL_ROTATION: Rotation = [
   { characterId: testPyro.id, actionType: "normal" },
@@ -208,12 +212,82 @@ describe("damageTypes scope survives the round trip", () => {
   });
 });
 
+describe("Staff of Homa passive translation", () => {
+  it("keeps the sourced R1 and R5 HP and HP-to-ATK values", () => {
+    for (const [refinement, hpPercent, ratio, lowHpRatio] of [
+      [1, 0.2, 0.008, 0.01],
+      [5, 0.4, 0.016, 0.018],
+    ] as const) {
+      const homa = weaponFor(HOMA);
+      const row = homa.passive!.refinements.find((r) => r.refinement === refinement)!;
+      const buffs = buffsForRefinement(HOMA, homa.passive!.name, row);
+      expect(buffs).toHaveLength(2);
+      expect(harvestWeaponPassiveBuffs({
+        refinement,
+        weaponPassive: weaponPassiveBuffsById(HOMA)!,
+      })).toHaveLength(2);
+      const alwaysOn = buffs.find((buff) => buff.conditions === undefined)!;
+      expect(alwaysOn.modifiers).toEqual([{ stat: "hpPercent", value: hpPercent }]);
+      expect(alwaysOn.conversions).toEqual([
+        { sourceStat: "hp", targetStat: "atkFlat", ratio },
+      ]);
+      const lowHp = buffs.find((buff) => buff.conditions !== undefined)!;
+      expect(lowHp.conditions).toEqual({ maxHpFractionExclusive: 0.5 });
+      expect(lowHp.conversions).toEqual([
+        { sourceStat: "hp", targetStat: "atkFlat", ratio: lowHpRatio },
+      ]);
+    }
+  });
+
+  it("uses the conditional branch through the equipment/passive seam", () => {
+    const homa = weaponFor(HOMA);
+    const r1 = homa.passive!.refinements.find((r) => r.refinement === 1)!;
+    const buffs = buffsForRefinement(HOMA, homa.passive!.name, r1);
+    const lowHp = {
+      ...buffs.find((buff) => buff.conditions !== undefined)!,
+      sourceCharacterId: testPyro.id,
+    };
+    const fullHpSnapshot = simulateRotation([testPyro], [], testEnemy).finalState;
+    const belowHalfSnapshot = {
+      ...fullHpSnapshot,
+      characters: {
+        ...fullHpSnapshot.characters,
+        [testPyro.id]: {
+          ...fullHpSnapshot.characters[testPyro.id]!,
+          currentHp: fullHpSnapshot.characters[testPyro.id]!.maxHp! * 0.4,
+        },
+      },
+    };
+    const state = {
+      buffs: [lowHp],
+      snapshot: belowHalfSnapshot,
+    };
+    // This is the same equipment buff consumed by the engine; its HP gate is
+    // active only when the scenario provides current/max HP state.
+    expect(state.snapshot.characters[testPyro.id]!.currentHp).toBeLessThan(
+      state.snapshot.characters[testPyro.id]!.maxHp!,
+    );
+    expect(
+      getActiveBuffs(0, state, {
+        character: testPyro,
+        activeCharacterId: testPyro.id,
+      }),
+    ).toHaveLength(1);
+    expect(
+      getActiveBuffs(0, { buffs: [lowHp], snapshot: fullHpSnapshot }, {
+        character: testPyro,
+        activeCharacterId: testPyro.id,
+      }),
+    ).toHaveLength(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // FAIL CLOSED — bucketing and refinement
 // ---------------------------------------------------------------------------
 
 describe("only the expressible bucket becomes a Buff", () => {
-  it("no non-expressible row anywhere yields a buff", () => {
+  it("no non-expressible row anywhere yields a buff except Homa's translated rows", () => {
     let expressible = 0;
     let skipped = 0;
     for (const [id, weapon] of generatedWeaponsById) {
@@ -223,8 +297,10 @@ describe("only the expressible bucket becomes a Buff", () => {
           expressible += 1;
         } else {
           skipped += 1;
-          // An always-on approximation of a conditional passive overstates it.
-          expect(buffs).toEqual([]);
+          if (id !== HOMA && id !== MISTSPLITTER) {
+            // An always-on approximation of a conditional passive overstates it.
+            expect(buffs).toEqual([]);
+          }
         }
       }
     }
@@ -235,15 +311,133 @@ describe("only the expressible bucket becomes a Buff", () => {
     expect(skipped).toBeGreaterThan(0);
   });
 
-  it("exactly the six always-on weapons feed buffs into the engine", () => {
+  it("exactly the six always-on weapons plus Homa feed buffs into the engine", () => {
     expect([...weaponPassiveBuffsByWeaponId.keys()].sort()).toEqual([
       "festeringdesire",
+      MISTSPLITTER,
       "redhornstonethresher",
       "rust",
+      HOMA,
       "thecatch",
       "thestringless",
       "whitetassel",
     ]);
+  });
+
+  it("Mistsplitter wires its all-element grant and three Emblem channels at each refinement", () => {
+    const expected = [0.12, 0.15, 0.18, 0.21, 0.24];
+    for (const [index, refinement] of ([1, 2, 3, 4, 5] as const).entries()) {
+      const buffs = buffsForRefinement(
+        MISTSPLITTER,
+        "Mistsplitter's Edge",
+        weaponFor(MISTSPLITTER).passive!.refinements[index]!,
+      );
+      expect(buffs).toHaveLength(22);
+      expect(buffs[0]!.modifiers).toHaveLength(7);
+      expect(
+        buffs[0]!.modifiers?.filter((modifier) => modifier.stat === "elementalDmgBonus"),
+      ).toHaveLength(7);
+      expect(buffs[0]!.modifiers?.every((modifier) => modifier.value === expected[index])).toBe(true);
+      expect(buffs[0]!.modifiers?.some((modifier) => modifier.element === "physical")).toBe(false);
+      expect(buffs.slice(1).every((buff) =>
+        buff.conditions?.elements?.length === 1 &&
+        (buff.conditions.resources?.[0]?.value === 1 || buff.conditions.requiresEnergyBelowMax),
+      )).toBe(true);
+      const normalValue = buffs.find((buff) => buff.id.endsWith("emblem-normal-pyro"))?.modifiers?.[0]?.value;
+      const burstValue = buffs.find((buff) => buff.id.endsWith("emblem-burst-pyro"))?.modifiers?.[0]?.value;
+      const energyValue = buffs.find((buff) => buff.id.endsWith("emblem-energy-pyro"))?.modifiers?.[0]?.value;
+      expect([normalValue, burstValue, energyValue]).toEqual(
+        [[0.08, 0.08, 0.12], [0.1, 0.1, 0.15], [0.12, 0.12, 0.18], [0.14, 0.14, 0.21], [0.16, 0.16, 0.24]][index],
+      );
+      expect(refinement).toBe(index + 1);
+    }
+  });
+
+  it("Mistsplitter emits independent normal-hit and burst stack triggers", () => {
+    const passive = weaponPassiveBuffsById(MISTSPLITTER);
+    expect(passive?.stateEffectsByRefinement?.[1]).toEqual([
+      expect.objectContaining({
+        kind: "resourceOnTrigger",
+        resourceId: "mistsplitter-emblem-normal",
+        trigger: "damageDealt",
+        actionTypes: ["normal", "charged"],
+        elements: expect.arrayContaining(["electro", "pyro"]),
+        durationSeconds: 5,
+        maxStacks: 1,
+      }),
+      expect.objectContaining({
+        kind: "resourceOnTrigger",
+        resourceId: "mistsplitter-emblem-burst",
+        trigger: "burstCast",
+        durationSeconds: 10,
+        maxStacks: 1,
+      }),
+    ]);
+  });
+
+  it("activates the burst Emblem stack for later elemental damage", () => {
+    const character: CharacterDefinition = {
+      ...testPyro,
+      id: "mistsplitter-test-pyro",
+      elementalSkill: { ...testPyro.elementalSkill, cooldown: 0 },
+    };
+    const rotation: Rotation = [
+      { characterId: character.id, actionType: "skill" },
+      { characterId: character.id, actionType: "burst" },
+      { characterId: character.id, actionType: "skill" },
+    ];
+    const bare = simulateRotation([character], rotation, testEnemy, { critMode: "never" });
+    const equipped = simulateRotation([character], rotation, testEnemy, {
+      critMode: "never",
+      equipmentBuffs: {
+        [character.id]: {
+          refinement: 1,
+          weaponPassive: weaponPassiveBuffsById(MISTSPLITTER)!,
+        },
+      },
+    });
+    const bareSkills = bare.timeline.filter(
+      (event) => event.type === "damage" && event.characterId === character.id && event.description.includes("Flame Strike"),
+    );
+    const equippedSkills = equipped.timeline.filter(
+      (event) => event.type === "damage" && event.characterId === character.id && event.description.includes("Flame Strike"),
+    );
+    expect(equippedSkills).toHaveLength(2);
+    expect(bareSkills).toHaveLength(2);
+    expect((equippedSkills[1]?.damage?.finalDamage ?? 0)).toBeGreaterThan(
+      equippedSkills[0]?.damage?.finalDamage ?? 0,
+    );
+    expect(equippedSkills[1]?.damage?.finalDamage ?? 0).toBeGreaterThan(
+      bareSkills[1]?.damage?.finalDamage ?? 0,
+    );
+    expect(
+      equipped.finalState.characters[character.id]?.resources?.["mistsplitter-emblem-burst"]?.value,
+    ).toBe(1);
+  });
+
+  it("grants the first Emblem stack from elemental charged damage", () => {
+    const character: CharacterDefinition = {
+      ...testPyro,
+      id: "mistsplitter-charged-pyro",
+      chargedAttack: { ...testPyro.chargedAttack, element: "pyro" },
+    };
+    const result = simulateRotation(
+      [character],
+      [{ characterId: character.id, actionType: "charged" }],
+      testEnemy,
+      {
+        critMode: "never",
+        equipmentBuffs: {
+          [character.id]: {
+            refinement: 1,
+            weaponPassive: weaponPassiveBuffsById(MISTSPLITTER)!,
+          },
+        },
+      },
+    );
+    expect(
+      result.finalState.characters[character.id]?.resources?.["mistsplitter-emblem-normal"]?.value,
+    ).toBe(1);
   });
 
   it("a weapon with no expressible refinement yields no passive entry", () => {
@@ -251,7 +445,9 @@ describe("only the expressible bucket becomes a Buff", () => {
       const expressible = (weapon.passive?.refinements ?? []).some(
         (row) => row.bucket === "expressible",
       );
-      if (!expressible) expect(weaponPassiveBuffs(weapon)).toBeUndefined();
+      if (!expressible && weapon.id !== HOMA && weapon.id !== MISTSPLITTER) {
+        expect(weaponPassiveBuffs(weapon)).toBeUndefined();
+      }
     }
   });
 });
@@ -315,7 +511,10 @@ describe("refinement fails closed", () => {
         );
         const present = passive.buffsByRefinement[level] !== undefined;
         expect(present, `${id} R${level}`).toBe(
-          row?.bucket === "expressible" && buffsForRefinement(id, "", row).length > 0,
+          id === HOMA ||
+            id === MISTSPLITTER ||
+            (row?.bucket === "expressible" &&
+              buffsForRefinement(id, "", row).length > 0),
         );
       }
     }
@@ -380,8 +579,9 @@ describe("the adapter is deterministic", () => {
           expect(buff.duration).toBe(Number.POSITIVE_INFINITY);
           expect(buff.startTime).toBe(0);
           expect(buff.stacking).toEqual({ mode: "refresh" });
-          // NOT `party`: a weapon buffs its wearer, never the whole team.
-          expect(buff.targets.scope).toBe("active");
+          // NOT `party`: a weapon buffs its wearer, including while that
+          // character is off field for snapshot or coordinated damage.
+          expect(buff.targets.scope).toBe("self");
         }
       }
     }

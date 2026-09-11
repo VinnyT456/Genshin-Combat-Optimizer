@@ -1,48 +1,42 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArtifactSetDefinition } from "@/game-data/artifacts/types";
 import { allArtifacts } from "@/game-data/artifacts/registry";
 import { Dialog } from "@/components/ui/Dialog";
 import { cn } from "@/components/ui/cn";
-import { DISABLED, FOCUS_RING } from "@/components/ui/tokens";
+import { DISABLED, FOCUS_RING, TOUCH_TARGET } from "@/components/ui/tokens";
 import { ArtifactAvatar } from "@/components/ui/ArtifactAvatar";
-import { filterArtifacts } from "@/features/team-builder/artifactModel";
+import { LiveRegion } from "@/components/ui/LiveRegion";
+import { filterArtifacts, type ArtifactRarityFilter } from "@/features/team-builder/artifactModel";
+import { artifactBonusSupport } from "@/features/team-builder/artifactSupportPresentation";
 import {
-  ARTIFACT_FOUR_PIECE,
-  ARTIFACT_TWO_PIECE,
-} from "@/features/team-builder/artifactSupportPresentation";
-import {
-  ARTIFACT_PIECE_COUNTS,
+  artifactCombinationLabel,
   type ArtifactPieceCount,
   DEFAULT_ARTIFACT_PIECES,
 } from "@/features/team-builder/equipmentSelection";
+import {
+  ARTIFACT_SLOTS,
+  type ArtifactLoadout,
+  type ArtifactPiece,
+  type ArtifactSlot,
+} from "@/simulation/character/equipment";
+import {
+  ArtifactStatsEditor,
+  applyArtifactStatPreset,
+  ARTIFACT_STAT_PRESETS,
+  type ArtifactStatPresetId,
+  normalizeArtifactLoadout,
+  normalizeArtifactLoadoutForSlots,
+} from "@/features/team-builder/ArtifactStatsEditor";
 
-/** Piece counts the picker renders, in the order the game presents them. */
-const TWO_PIECE = ARTIFACT_TWO_PIECE;
-const FOUR_PIECE = ARTIFACT_FOUR_PIECE;
-const ONE_PIECE = 1;
-
-interface Props {
-  open: boolean;
-  characterName: string;
-  currentArtifactId?: string | null;
-  /**
-   * How many pieces of the current set the character wears.
-   *
-   * The picker OPENS at this count and hands it back on select. It is a real
-   * simulation input: `activeSetBonusKeys()` gates the 4pc tier on the count,
-   * so a set chosen without one has no tier active and grants nothing.
-   */
-  currentPieces?: ArtifactPieceCount;
-  onClose: () => void;
-  onSelect: (
-    artifact: ArtifactSetDefinition | null,
-    pieces: ArtifactPieceCount,
-  ) => void;
-}
-
-export type ArtifactRarityFilter = "all" | 4 | 5;
+const SLOT_LABELS: Record<ArtifactSlot, string> = {
+  flower: "生之花",
+  plume: "死之羽",
+  sands: "时之沙",
+  goblet: "空之杯",
+  circlet: "理之冠",
+};
 
 const RARITY_OPTIONS: readonly { id: ArtifactRarityFilter; label: string }[] = [
   { id: "all", label: "全部品质" },
@@ -50,30 +44,217 @@ const RARITY_OPTIONS: readonly { id: ArtifactRarityFilter; label: string }[] = [
   { id: 4, label: "4★ 圣遗物" },
 ];
 
+function emptyArtifactPiece(slot: ArtifactSlot, setId: string): ArtifactPiece {
+  return {
+    slot,
+    setId,
+    mainStat: { stat: "atkFlat", value: 0 },
+    substats: [],
+  };
+}
+
+function initialLoadout(
+  setId: string | null | undefined,
+  pieces: ArtifactPieceCount | undefined,
+  source: ArtifactLoadout | undefined,
+): ArtifactLoadout {
+  if (source && Object.keys(source).length > 0) return source;
+  if (setId && pieces !== undefined) return normalizeArtifactLoadout(setId, pieces);
+  return {};
+}
+
+function statKey(value: { stat: string; value: number; element?: string } | undefined): string {
+  if (!value) return "";
+  return `${value.stat}:${value.value}:${value.element ?? ""}`;
+}
+
+/** Stable draft identity used for dirty-state detection and deterministic UI. */
+function loadoutKey(loadout: ArtifactLoadout): string {
+  return ARTIFACT_SLOTS.map((slot) => {
+    const piece = loadout[slot];
+    if (!piece) return `${slot}:`;
+    return [
+      slot,
+      piece.setId,
+      statKey(piece.mainStat),
+      ...piece.substats.map(statKey),
+    ].join("|");
+  }).join(";");
+}
+
+function dominantSet(loadout: ArtifactLoadout): { setId: string; count: number } | null {
+  const counts = new Map<string, number>();
+  for (const slot of ARTIFACT_SLOTS) {
+    const setId = loadout[slot]?.setId;
+    if (setId) counts.set(setId, (counts.get(setId) ?? 0) + 1);
+  }
+  let winner: { setId: string; count: number } | null = null;
+  for (const slot of ARTIFACT_SLOTS) {
+    const setId = loadout[slot]?.setId;
+    if (!setId) continue;
+    const count = counts.get(setId) ?? 0;
+    if (winner === null || count > winner.count) winner = { setId, count };
+  }
+  return winner;
+}
+
+interface Props {
+  open: boolean;
+  characterName: string;
+  currentArtifactId?: string | null;
+  currentPieces?: ArtifactPieceCount;
+  currentArtifactLoadout?: ArtifactLoadout;
+  onClose: () => void;
+  onSelect: (
+    artifact: ArtifactSetDefinition | null,
+    pieces: ArtifactPieceCount,
+    artifactLoadout?: ArtifactLoadout,
+  ) => void;
+}
+
 export function ArtifactPicker({
   open,
   characterName,
   currentArtifactId,
   currentPieces = DEFAULT_ARTIFACT_PIECES,
+  currentArtifactLoadout,
   onClose,
   onSelect,
 }: Props) {
   const [query, setQuery] = useState("");
-  // One piece count applies to the whole browse list, for the same reason the
-  // weapon picker keeps one refinement: the user is comparing sets at an
-  // ownership they have, and per-card state would let two cards silently
-  // describe different builds.
-  const [pieces, setPieces] = useState<ArtifactPieceCount>(currentPieces);
   const [rarityFilter, setRarityFilter] = useState<ArtifactRarityFilter>("all");
-  const [expandedPassives, setExpandedPassives] = useState<Record<string, boolean>>({});
-  const [allExpanded, setAllExpanded] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<ArtifactSlot>("flower");
+  const [quickSetId, setQuickSetId] = useState(currentArtifactId ?? "");
+  const [quickPreset, setQuickPreset] = useState<ArtifactStatPresetId>("main");
+  const [quickPresetScope, setQuickPresetScope] = useState<"current" | "assigned">("current");
+  const [draft, setDraft] = useState<ArtifactLoadout>(() =>
+    initialLoadout(currentArtifactId, currentPieces, currentArtifactLoadout),
+  );
+  const [discardPrompt, setDiscardPrompt] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const continueRef = useRef<HTMLButtonElement | null>(null);
 
-  const filtered = useMemo(() => {
-    // `filterArtifacts` already returns the rarity-then-name order the header
-    // states; wrapping it in `sortArtifacts` again was a redundant second pass.
-    return filterArtifacts(allArtifacts, { rarity: rarityFilter, query });
-  }, [rarityFilter, query]);
+  const filtered = useMemo(
+    () => filterArtifacts(allArtifacts, { rarity: rarityFilter, query }),
+    [rarityFilter, query],
+  );
+  const slotSetIds = useMemo(
+    () =>
+      Object.fromEntries(
+        ARTIFACT_SLOTS.map((slot) => [slot, draft[slot]?.setId ?? null]),
+      ) as Partial<Record<ArtifactSlot, string | null>>,
+    [draft],
+  );
+  const assignedSlots = ARTIFACT_SLOTS.filter((slot) => draft[slot]);
+  const combination = artifactCombinationLabel(draft);
+  const initialKey = useMemo(
+    () => loadoutKey(initialLoadout(currentArtifactId, currentPieces, currentArtifactLoadout)),
+    [currentArtifactId, currentPieces, currentArtifactLoadout],
+  );
+  const dirty = loadoutKey(draft) !== initialKey;
+  const selectedPiece = draft[selectedSlot];
+  const selectedArtifact = selectedPiece
+    ? allArtifacts.find((artifact) => artifact.id === selectedPiece.setId)
+    : undefined;
+
+  useEffect(() => {
+    if (discardPrompt) continueRef.current?.focus();
+  }, [discardPrompt]);
+
+  function assignSetToSlot(setId: string, slot = selectedSlot) {
+    setQuickSetId(setId);
+    setDraft((current) => {
+      const previous = current[slot];
+      const nextPiece = previous?.setId === setId
+        ? previous
+        : {
+            ...(previous ?? emptyArtifactPiece(slot, setId)),
+            slot,
+            setId,
+          };
+      return { ...current, [slot]: nextPiece };
+    });
+    const artifact = allArtifacts.find((candidate) => candidate.id === setId);
+    setAnnouncement(
+      artifact
+        ? `已将${artifact.nameZh}配置到${SLOT_LABELS[slot]}，尚未保存。`
+        : `已配置${SLOT_LABELS[slot]}，尚未保存。`,
+    );
+  }
+
+  function equipQuickSet() {
+    if (!quickSetId) return;
+    setDraft((current) => {
+      const next: ArtifactLoadout = { ...current };
+      for (const slot of ARTIFACT_SLOTS) {
+        const previous = current[slot];
+        next[slot] = previous?.setId === quickSetId
+          ? previous
+          : {
+              ...(previous ?? emptyArtifactPiece(slot, quickSetId)),
+              slot,
+              setId: quickSetId,
+            };
+      }
+      return next;
+    });
+    const artifact = allArtifacts.find((candidate) => candidate.id === quickSetId);
+    setAnnouncement(artifact ? `已将${artifact.nameZh}快速配置到五个部位，尚未保存。` : "已快速配置五个部位，尚未保存。");
+  }
+
+  function applyQuickPreset() {
+    const slots = quickPresetScope === "current" ? [selectedSlot] : ARTIFACT_SLOTS;
+    if (quickPresetScope === "current" && !draft[selectedSlot]) {
+      setAnnouncement(`请先为${SLOT_LABELS[selectedSlot]}选择套装。`);
+      return;
+    }
+    if (quickPresetScope === "assigned" && assignedSlots.length === 0) {
+      setAnnouncement("请先选择至少一个套装部位。");
+      return;
+    }
+    setDraft((current) => applyArtifactStatPreset(current, quickPreset, slots));
+    const presetLabel = ARTIFACT_STAT_PRESETS.find((preset) => preset.id === quickPreset)?.label ?? "词条模板";
+    setAnnouncement(`已为${quickPresetScope === "current" ? SLOT_LABELS[selectedSlot] : "已配置部位"}套用${presetLabel}，尚未保存。`);
+  }
+
+  function clearSlot(slot: ArtifactSlot) {
+    setDraft((current) => {
+      const next = { ...current };
+      delete next[slot];
+      return next;
+    });
+    setAnnouncement(`已卸下${SLOT_LABELS[slot]}，尚未保存。`);
+  }
+
+  function clearAll() {
+    setDraft({});
+    setAnnouncement("已清空五件配置，尚未保存。");
+  }
+
+  function saveDraft() {
+    const normalized = normalizeArtifactLoadoutForSlots(slotSetIds, draft);
+    const primary = dominantSet(normalized);
+    if (!primary) {
+      onSelect(null, DEFAULT_ARTIFACT_PIECES);
+      return;
+    }
+    const artifact = allArtifacts.find((candidate) => candidate.id === primary.setId) ?? null;
+    onSelect(artifact, primary.count as ArtifactPieceCount, normalized);
+  }
+
+  function requestClose() {
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    setDiscardPrompt(true);
+  }
+
+  function discardAndClose() {
+    setDiscardPrompt(false);
+    onClose();
+  }
 
   function clearFilters() {
     setQuery("");
@@ -81,281 +262,357 @@ export function ArtifactPicker({
     searchRef.current?.focus();
   }
 
-  function togglePassive(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    setExpandedPassives((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
-  }
-
-  function toggleAllPassives() {
-    const nextState = !allExpanded;
-    setAllExpanded(nextState);
-    const nextMap: Record<string, boolean> = {};
-    for (const w of filtered) {
-      nextMap[w.id] = nextState;
-    }
-    setExpandedPassives(nextMap);
-  }
-
   return (
     <Dialog
       open={open}
-      title={`选择圣遗物 — ${characterName}`}
-      onClose={onClose}
+      title={`为${SLOT_LABELS[selectedSlot]}选择套装 · ${characterName}`}
+      onClose={requestClose}
       initialFocusRef={searchRef}
       size="browse"
     >
+      <LiveRegion message={announcement} />
       <div className="space-y-4">
-        {/* Search and Filters Header */}
-        <div className="space-y-3">
-          <div className="relative">
-            <input
-              ref={searchRef}
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="搜索圣遗物"
-              placeholder="搜索圣遗物名称（中文/英文）…"
-              className={cn(
-                "w-full rounded-xl border border-surface-border bg-surface-raised px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500",
-                FOCUS_RING,
-              )}
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                aria-label="清空搜索"
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-200"
-              >
-                清除
-              </button>
-            )}
-          </div>
+        <div className="rounded-md border border-amber-400/25 bg-amber-950/15 px-3 py-2.5 text-xs text-slate-300">
+          先选择部位，再选择套装。更改仅在保存后生效。
+        </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-400 font-medium">品质筛选:</span>
-              {RARITY_OPTIONS.map((opt) => {
-                const active = rarityFilter === opt.id;
+        <section aria-label="圣遗物搜索与筛选" className="space-y-3">
+          <label htmlFor="artifact-search" className="sr-only">搜索圣遗物</label>
+          <input
+            id="artifact-search"
+            ref={searchRef}
+            name="artifact-search"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="搜索圣遗物名称或效果…"
+            className={cn(
+              "w-full rounded-md border border-surface-border bg-surface-raised px-4 py-3 text-sm text-slate-100 placeholder-slate-500",
+              FOCUS_RING,
+            )}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-slate-400">品质筛选</span>
+            <fieldset className="flex flex-wrap gap-2">
+              <legend className="sr-only">圣遗物品质</legend>
+              {RARITY_OPTIONS.map((option) => {
+                const active = rarityFilter === option.id;
                 return (
                   <button
-                    key={opt.id}
+                    key={option.id}
                     type="button"
-                    onClick={() => setRarityFilter(opt.id)}
+                    aria-pressed={active}
+                    onClick={() => setRarityFilter(option.id)}
                     className={cn(
-                      "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
+                      `${TOUCH_TARGET} rounded-md border px-3 text-xs font-semibold`,
+                      FOCUS_RING,
                       active
-                        ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm"
-                        : "bg-surface border border-surface-border text-slate-300 hover:bg-surface-raised",
+                        ? "border-amber-400/60 bg-amber-500/20 text-amber-300"
+                        : "border-surface-border bg-surface text-slate-300 hover:border-amber-400/70 hover:text-amber-300",
                     )}
                   >
-                    {opt.label}
+                    {option.label}
                   </button>
                 );
               })}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {/*
-                The piece count GATES which tier is live: `activeSetBonusKeys()`
-                grants the 4pc bonus at four pieces and not at three, so this
-                control changes the simulation and not just the reading order.
-              */}
-              <label
-                htmlFor="artifact-pieces"
-                className="text-xs font-medium text-slate-400"
-              >
-                装备件数:
-              </label>
-              <select
-                id="artifact-pieces"
-                value={pieces}
-                onChange={(e) =>
-                  setPieces(Number(e.target.value) as ArtifactPieceCount)
-                }
-                className={cn(
-                  "rounded-md border border-surface-border bg-surface px-2 py-1.5 text-xs font-mono tabular-nums text-slate-200",
-                  FOCUS_RING,
-                )}
-              >
-                {ARTIFACT_PIECE_COUNTS.map((count) => (
-                  <option key={count} value={count}>
-                    {count} 件套
-                  </option>
-                ))}
-              </select>
-
+            </fieldset>
+            {(query || rarityFilter !== "all") && (
               <button
                 type="button"
-                onClick={toggleAllPassives}
-                className="rounded-md border border-surface-border bg-surface px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-amber-400 hover:text-amber-300"
+                onClick={clearFilters}
+                className={cn(`${TOUCH_TARGET} rounded-md px-3 text-xs text-amber-300 hover:bg-amber-500/10`, FOCUS_RING)}
               >
-                {allExpanded ? "收起全部" : "展开全部"}
+                清空筛选
               </button>
+            )}
+          </div>
+        </section>
+
+        <section aria-label="五件配置" className="space-y-3 rounded-md border border-surface-border bg-surface/60 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-100">五件配置</h3>
+              <p className="mt-1 text-xs leading-relaxed text-slate-400">选择一个部位，再从下方套装卡中配置。</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-surface-border bg-surface px-2.5 py-1 text-xs text-slate-300">
+                已配置 {assignedSlots.length}/5 件{combination ? ` · ${combination}` : ""}
+              </span>
+              {assignedSlots.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className={cn(`${TOUCH_TARGET} rounded-md px-2 text-xs text-slate-400 hover:text-amber-300`, FOCUS_RING)}
+                >
+                  清空五件
+                </button>
+              )}
             </div>
           </div>
-        </div>
-
-        {/* Counter header */}
-        <div className="flex items-center justify-between border-b border-surface-border pb-2 text-xs text-slate-400 font-mono">
-          <span>
-            按品质及中文名称排列 · 匹配到 {filtered.length} / {allArtifacts.length} 套圣遗物
-          </span>
-          {query || rarityFilter !== "all" ? (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="text-amber-400 hover:underline"
-            >
-              清空筛选
-            </button>
-          ) : null}
-        </div>
-
-        {/* Artifact Grid */}
-        {filtered.length === 0 ? (
-          <div className="rounded-xl border border-surface-border bg-surface p-8 text-center text-sm text-slate-400">
-            <p>未找到符合条件的圣遗物。</p>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="mt-2 text-xs text-amber-400 hover:underline"
-            >
-              重置筛选条件
-            </button>
-          </div>
-        ) : (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {filtered.map((a) => {
-              const isEquipped = currentArtifactId === a.id;
-              const isExpanded = allExpanded || Boolean(expandedPassives[a.id]);
-              const bonus1pc = a.bonuses.find((b) => b.pieces === ONE_PIECE)?.descriptionZh;
-              const bonus2pc = a.bonuses.find((b) => b.pieces === TWO_PIECE)?.descriptionZh;
-              const bonus4pc = a.bonuses.find((b) => b.pieces === FOUR_PIECE)?.descriptionZh;
-              return (
-                <li key={a.id} className="flex">
-                  <article
-                    className={cn(
-                      "flex h-full w-full flex-col gap-3 rounded-md border p-4 text-left transition-colors cursor-pointer",
-                      isEquipped
-                        ? "border-amber-400 bg-amber-950/20 ring-1 ring-amber-400 shadow-md"
-                        : "border-surface-border bg-surface-raised hover:border-amber-400/80 hover:-translate-y-0.5 hover:shadow-lg",
-                      FOCUS_RING,
-                      DISABLED,
-                    )}
+          <div className="grid gap-2 rounded-md border border-amber-400/20 bg-amber-950/10 p-2.5 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="space-y-1 text-xs text-slate-400">
+                <span className="block font-semibold text-slate-300">快速套装</span>
+                <select
+                  aria-label="快速选择套装"
+                  value={quickSetId}
+                  onChange={(event) => setQuickSetId(event.target.value)}
+                  className={cn("w-full rounded-md border border-surface-border bg-surface-raised px-2 py-2 text-xs text-slate-200", FOCUS_RING)}
+                >
+                  <option value="">选择套装后可一键五件同套</option>
+                  {allArtifacts.map((artifact) => (
+                    <option key={artifact.id} value={artifact.id}>{artifact.nameZh} · {artifact.rarity}星</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs text-slate-400">
+                <span className="block font-semibold text-slate-300">快速词条模板</span>
+                <div className="flex gap-2">
+                  <select
+                    aria-label="快速词条模板"
+                    value={quickPreset}
+                    onChange={(event) => setQuickPreset(event.target.value as ArtifactStatPresetId)}
+                    className={cn("min-w-0 flex-1 rounded-md border border-surface-border bg-surface-raised px-2 py-2 text-xs text-slate-200", FOCUS_RING)}
                   >
-                    {/* Header: rarity. No version badge — no artifact source
-                        publishes a release version, so `a.version` is always
-                        undefined and the badge could never render.
-                        `artifactModel.test.ts` pins that fact. */}
-                    <div className="flex items-center justify-between gap-1">
-                      <div className="flex items-center gap-1.5">
+                    {ARTIFACT_STAT_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="词条模板应用范围"
+                    value={quickPresetScope}
+                    onChange={(event) => setQuickPresetScope(event.target.value as "current" | "assigned")}
+                    className={cn("rounded-md border border-surface-border bg-surface-raised px-2 py-2 text-xs text-slate-200", FOCUS_RING)}
+                  >
+                    <option value="current">当前部位</option>
+                    <option value="assigned">已配置部位</option>
+                  </select>
+                </div>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-end gap-2 sm:justify-end">
+              <button
+                type="button"
+                onClick={equipQuickSet}
+                disabled={!quickSetId}
+                className={cn(`${TOUCH_TARGET} rounded-md border border-amber-400/40 px-3 text-xs font-semibold text-amber-200 hover:bg-amber-500/15`, FOCUS_RING, DISABLED)}
+              >
+                五件同套
+              </button>
+              <button
+                type="button"
+                onClick={applyQuickPreset}
+                disabled={assignedSlots.length === 0}
+                className={cn(`${TOUCH_TARGET} rounded-md border border-cyan-400/40 px-3 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/15`, FOCUS_RING, DISABLED)}
+              >
+                套用模板
+              </button>
+            </div>
+            <p className="text-micro leading-relaxed text-slate-500 sm:col-span-2">
+              模板使用固定演示值，可继续逐项修改；百分比按百分数显示。
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            {ARTIFACT_SLOTS.map((slot) => {
+              const piece = draft[slot];
+              const artifact = piece ? allArtifacts.find((candidate) => candidate.id === piece.setId) : undefined;
+              const hasStats = piece
+                ? [piece.mainStat, ...piece.substats].some((stat) => stat.value !== 0)
+                : false;
+              const selected = selectedSlot === slot;
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  aria-pressed={selected}
+                  aria-label={`${SLOT_LABELS[slot]}，${artifact?.nameZh ?? "未装备"}，${hasStats ? "已录入属性" : "属性未录入"}${selected ? "，当前部位" : ""}`}
+                  onClick={() => setSelectedSlot(slot)}
+                  className={cn(
+                    `${TOUCH_TARGET} min-w-0 w-full rounded-md border px-3 py-2 text-left`,
+                    FOCUS_RING,
+                    selected
+                      ? "border-amber-400 bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/60"
+                      : "border-surface-border bg-surface-raised text-slate-300 hover:border-amber-400/70",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <span>{SLOT_LABELS[slot]}</span>
+                    {selected && <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-micro text-amber-300">当前部位</span>}
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-slate-200">{artifact?.nameZh ?? "未装备"}</span>
+                  <span className="mt-1 block text-micro text-slate-400">{hasStats ? "已录入属性" : "属性未录入"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section aria-label={`${SLOT_LABELS[selectedSlot]}属性`} className="space-y-3 rounded-md border border-surface-border bg-surface/60 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-100">{SLOT_LABELS[selectedSlot]}属性</h3>
+              <p className="mt-1 text-xs text-slate-400">
+                {selectedArtifact ? `套装：${selectedArtifact.nameZh}` : "请先从下方选择套装"}
+              </p>
+            </div>
+            {selectedPiece && (
+              <button
+                type="button"
+                onClick={() => clearSlot(selectedSlot)}
+                className={cn(`${TOUCH_TARGET} rounded-md border border-surface-border px-3 text-xs text-slate-300 hover:border-amber-400 hover:text-amber-300`, FOCUS_RING)}
+              >
+                卸下此件
+              </button>
+            )}
+          </div>
+          {selectedPiece ? (
+            <ArtifactStatsEditor
+              slots={[selectedSlot]}
+              slotSetIds={{ [selectedSlot]: selectedPiece.setId }}
+              value={draft}
+              onChange={(next) => setDraft((current) => ({ ...current, ...next }))}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-surface-border px-3 py-4 text-center text-xs text-slate-500">
+              选择下方套装卡后，可在此录入主词条与副词条。
+            </p>
+          )}
+        </section>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-2">
+          <p aria-live="polite" className="text-xs text-slate-400">
+            当前显示 <span className="font-mono tabular-nums text-slate-200">{filtered.length}</span> / {allArtifacts.length} 套圣遗物 · 按上线顺序倒序
+          </p>
+          <span className="sr-only">匹配到 {filtered.length} / {allArtifacts.length} 套圣遗物</span>
+          {filtered.length === 0 && <span className="text-xs text-slate-500">未找到符合条件的圣遗物。</span>}
+        </div>
+
+        {filtered.length > 0 ? (
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((artifact) => {
+              const selected = draft[selectedSlot]?.setId === artifact.id;
+              const usageCount = assignedSlots.filter((slot) => draft[slot]?.setId === artifact.id).length;
+              const accessibleName = `将${artifact.nameZh}（${artifact.rarity}星）配置到${SLOT_LABELS[selectedSlot]}${selected ? "，当前选择" : ""}`;
+              const bonuses = artifactBonusSupport(artifact.id).filter((bonus) =>
+                bonus.pieces === 1 || bonus.pieces === 2 || bonus.pieces === 4,
+              );
+              return (
+                <li key={artifact.id} className="flex">
+                  <article className="flex w-full">
+                    <button
+                      type="button"
+                      aria-label={accessibleName}
+                      aria-pressed={selected}
+                      onClick={() => assignSetToSlot(artifact.id)}
+                      className={cn(
+                        "flex h-full w-full flex-col gap-3 rounded-md border p-4 text-left transition-colors",
+                        FOCUS_RING,
+                        DISABLED,
+                        selected
+                          ? "border-cyan-400 bg-cyan-950/20 ring-1 ring-cyan-400/60"
+                          : "border-surface-border bg-surface-raised hover:border-amber-400/80 hover:bg-surface-hover",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <ArtifactAvatar iconId={artifact.iconId} nameZh={artifact.nameZh} size="sm" />
                         <span
                           className={cn(
-                            "px-2 py-0.5 rounded text-xs font-bold border",
-                            a.rarity === 5
-                              ? "bg-amber-400/15 text-amber-300 border-amber-500/30"
-                              : "bg-purple-400/15 text-purple-300 border-purple-500/30",
+                            "rounded border px-2 py-0.5 text-xs font-bold",
+                            artifact.rarity === 5
+                              ? "border-amber-500/30 bg-amber-400/15 text-amber-300"
+                              : "border-purple-500/30 bg-purple-400/15 text-purple-300",
                           )}
                         >
-                          {a.rarity}★
+                          {artifact.rarity}★
                         </span>
                       </div>
-                      <span className="text-xs text-slate-400 font-medium">
-                        圣遗物
-                      </span>
-                    </div>
-
-                    <ArtifactAvatar iconId={a.iconId} nameZh={a.nameZh} size="sm" />
-
-                    {/* Title */}
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className="truncate text-base font-bold text-slate-100"
-                        title={a.nameZh}
-                      >
-                        {a.nameZh}
+                      <div className="min-w-0">
+                        <h4 title={artifact.nameZh} className="break-words text-base font-bold leading-snug text-slate-100">
+                          {artifact.nameZh}
+                        </h4>
+                        <p className="mt-1 text-xs text-slate-400">圣遗物套装</p>
                       </div>
-                      <div
-                        className="truncate text-xs text-slate-400 mt-0.5"
-                      >
-                        {a.rarity}星 · 圣遗物套装
+                      <div className="space-y-2 text-xs leading-relaxed text-slate-300">
+                        {bonuses.map((bonus) => (
+                          <div key={bonus.pieces}>
+                            <span className="font-semibold text-amber-300">{bonus.pieces}件套</span>
+                            <p className="mt-0.5 break-words text-slate-400">{bonus.textZh}</p>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-
-                    {/* 1pc */}
-                    {bonus1pc && (
-                      <div className="rounded-xl bg-surface/90 px-3.5 py-2.5 border border-surface-border/60">
-                        <div className="flex items-center justify-between gap-2 text-micro font-medium text-slate-400">
-                          <span>1件套</span>
-                        </div>
-                        <div className="text-xs font-medium text-amber-300 mt-0.5 truncate" title={bonus1pc}>
-                          {bonus1pc}
-                        </div>
+                      <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-surface-border/60 pt-2 text-xs">
+                        <span className={selected ? "font-semibold text-cyan-300" : "font-medium text-slate-300"}>
+                          {selected ? "✓ 已配置到" : "配置到"}{SLOT_LABELS[selectedSlot]}
+                        </span>
+                        {usageCount > 0 && (
+                          <span className="text-slate-400">已用于 {usageCount} 件</span>
+                        )}
                       </div>
-                    )}
-
-                    {/* 2pc */}
-                    {bonus2pc && (
-                      <div className="rounded-xl bg-surface/90 px-3.5 py-2.5 border border-surface-border/60">
-                        <div className="flex items-center justify-between gap-2 text-micro font-medium text-slate-400">
-                          <span>2件套</span>
-                        </div>
-                        <div className="text-xs font-medium text-amber-300 mt-0.5 truncate" title={bonus2pc}>
-                          {bonus2pc}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 4pc */}
-                    {bonus4pc && (
-                      <div className="rounded-xl border border-surface-border/40 bg-surface/50 p-2.5 text-xs">
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-bold text-amber-300">
-                            4件套
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => togglePassive(a.id, e)}
-                            className="text-micro text-sky-400 hover:underline shrink-0"
-                          >
-                            {isExpanded ? "收起 ▲" : "展开4件套效果 ▼"}
-                          </button>
-                        </div>
-                        <p
-                          className={cn(
-                            "text-slate-300 leading-relaxed",
-                            !isExpanded && "line-clamp-2",
-                          )}
-                        >
-                          {bonus4pc}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Bottom Equip Action: standalone control keeps the card semantic. */}
-                    <div className="mt-auto flex items-center justify-between border-t border-surface-border/50 pt-2 text-xs">
-                      {isEquipped ? (
-                        <button type="button" onClick={() => onSelect(null, pieces)} className="font-semibold text-amber-400 flex items-center gap-1 hover:underline">
-                          <span>✓ 当前装备中 (点击卸下)</span>
-                        </button>
-                      ) : (
-                        <button type="button" onClick={() => onSelect(a, pieces)} className="text-slate-300 font-medium hover:text-amber-300 hover:underline">
-                          点击装配此套装
-                        </button>
-                      )}
-                      <span className="text-micro text-slate-400 font-mono">
-                        {a.rarity}星套装
-                      </span>
-                    </div>
+                    </button>
                   </article>
                 </li>
               );
             })}
           </ul>
+        ) : (
+          <div className="rounded-md border border-surface-border bg-surface p-8 text-center text-sm text-slate-400">
+            <button
+              type="button"
+              onClick={clearFilters}
+              className={cn("mt-2 rounded-md px-3 py-2 text-xs text-amber-300 hover:bg-amber-500/10", FOCUS_RING)}
+            >
+              重置筛选条件
+            </button>
+          </div>
+        )}
+
+        {discardPrompt && (
+          <div className="sticky bottom-0 z-10 -mx-4 border-t border-amber-400/40 bg-surface-raised/95 px-4 py-3 shadow-lg backdrop-blur-sm" role="alertdialog" aria-label="舍弃未保存修改">
+            <p className="text-sm font-semibold text-slate-100">有未保存的修改，确定要舍弃吗？</p>
+            <div className="mt-2 flex flex-wrap justify-end gap-2">
+              <button
+                ref={continueRef}
+                type="button"
+                onClick={() => setDiscardPrompt(false)}
+                className={cn(`${TOUCH_TARGET} rounded-md border border-surface-border px-3 text-xs text-slate-200 hover:border-amber-400`, FOCUS_RING)}
+              >
+                继续编辑
+              </button>
+              <button
+                type="button"
+                onClick={discardAndClose}
+                className={cn(`${TOUCH_TARGET} rounded-md bg-amber-500 px-3 text-xs font-semibold text-slate-950 hover:bg-amber-400`, FOCUS_RING)}
+              >
+                舍弃并关闭
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!discardPrompt && (
+          <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t border-surface-border bg-surface-raised/95 px-4 py-3 shadow-lg backdrop-blur-sm" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+            <span className={cn("text-xs", dirty ? "text-amber-300" : "text-slate-400")}>
+              {dirty ? "有未保存修改" : "当前配置已保存"}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={requestClose}
+                className={cn(`${TOUCH_TARGET} rounded-md border border-surface-border px-4 text-xs text-slate-200 hover:border-amber-400 hover:text-amber-300`, FOCUS_RING)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={saveDraft}
+                className={cn(`${TOUCH_TARGET} rounded-md bg-amber-500 px-4 text-xs font-semibold text-slate-950 hover:bg-amber-400`, FOCUS_RING)}
+              >
+                保存配置
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </Dialog>

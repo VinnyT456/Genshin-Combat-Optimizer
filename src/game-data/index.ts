@@ -32,6 +32,9 @@ export {
 export * from "./weapons/types";
 export * from "./weapons/registry";
 export * from "./characters/kits/raidenNationalKit";
+export * from "./characters/kits/raidenShogunDefinition";
+export * from "./characters/kits/xingqiuDefinition";
+export * from "./characters/kits/xianglingDefinition";
 
 /**
  * Playable roster, adapted to the legacy `CharacterDefinition` shape for UI

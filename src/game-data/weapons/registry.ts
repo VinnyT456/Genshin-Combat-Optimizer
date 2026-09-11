@@ -110,3 +110,56 @@ export function findGeneratedWeapon(id: string) {
     ? generatedWeaponsById.get(weapon.generatedId)
     : undefined;
 }
+
+/** Resolve only base ATK when a generated row has no substat value at a level. */
+export function findWeaponBaseAtkAtLevel(
+  id: string,
+  level: number,
+): number | undefined {
+  const weapon = findWeapon(id);
+  const generated = weapon?.generatedId
+    ? generatedWeaponsById.get(weapon.generatedId)
+    : undefined;
+  if (!weapon || !generated || !Number.isInteger(level) || level < 1 || level > 90) {
+    return undefined;
+  }
+  return generated.baseAtkByLevel[level];
+}
+
+/**
+ * Resolve the sourced combat stats at an exact weapon level.
+ *
+ * The website catalog intentionally exposes level-90 values for its compact
+ * card shape, but the generated record retains the complete verified curves.
+ * Consumers that simulate a non-90 weapon must use this seam instead of
+ * silently reusing the level-90 projection.  A missing generated table entry
+ * is reported as `undefined`; it is never interpolated or substituted.
+ */
+export function findWeaponStatsAtLevel(
+  id: string,
+  level: number,
+): { readonly baseAtk: number; readonly subStat: WeaponDefinition["subStat"] } | undefined {
+  const weapon = findWeapon(id);
+  const generated = weapon?.generatedId
+    ? generatedWeaponsById.get(weapon.generatedId)
+    : undefined;
+  const baseAtk = findWeaponBaseAtkAtLevel(id, level);
+  if (!weapon || !generated || baseAtk === undefined) {
+    return undefined;
+  }
+  const generatedSubstat = generated.substat;
+  if (!generatedSubstat) {
+    return {
+      baseAtk,
+      subStat: { type: "none", value: 0, labelZh: "无" },
+    };
+  }
+  const value = generatedSubstat.valueByLevel[level];
+  if (value === undefined) return undefined;
+  const type = legacySubstatType(generatedSubstat.stat);
+  if (type === null) return undefined;
+  return {
+    baseAtk,
+    subStat: { type, value, labelZh: weapon.subStat.labelZh },
+  };
+}

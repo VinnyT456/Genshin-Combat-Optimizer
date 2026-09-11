@@ -8,6 +8,7 @@ import type {
 import type {
   WeaponPassiveBuffs,
   WeaponRefinement,
+  WeaponStateEffectTemplate,
 } from "@/simulation/engine/equipmentBuffs";
 import type {
   GeneratedWeapon,
@@ -17,6 +18,7 @@ import type {
   GeneratedWeaponRefinement,
 } from "./generated";
 import { generatedWeaponsById } from "./generated";
+import type { Element } from "@/types";
 
 // ============================================================================
 // Generated weapon data -> `Buff` objects.
@@ -84,6 +86,59 @@ const PERMANENT_DURATION = Number.POSITIVE_INFINITY;
 
 /** Simulation time at which an always-on equipment buff becomes active. */
 const EQUIPMENT_BUFF_START_TIME = 0;
+
+/** Mistsplitter's unconditional all-element grant, by refinement. */
+const MISTSPLITTER_ALL_ELEMENT_BONUS_BY_REFINEMENT: Readonly<
+  Record<WeaponRefinement, number>
+> = {
+  1: 0.12,
+  2: 0.15,
+  3: 0.18,
+  4: 0.21,
+  5: 0.24,
+};
+
+/** Mistsplitter's first, second and third stack bonuses, by refinement. */
+const MISTSPLITTER_EMBLEM_BONUS_BY_REFINEMENT: Readonly<
+  Record<WeaponRefinement, readonly [number, number, number]>
+> = {
+  1: [0.08, 0.08, 0.12],
+  2: [0.1, 0.1, 0.15],
+  3: [0.12, 0.12, 0.18],
+  4: [0.14, 0.14, 0.21],
+  5: [0.16, 0.16, 0.24],
+};
+
+/** The passive says “all elements”; physical is intentionally excluded. */
+const ELEMENTAL_TYPES: readonly Element[] = [
+  "pyro",
+  "hydro",
+  "electro",
+  "cryo",
+  "anemo",
+  "geo",
+  "dendro",
+];
+
+/** Staff of Homa's sourced HP -> ATK ratios, by refinement. */
+const HOMA_ATK_RATIO_BY_REFINEMENT: Readonly<Record<WeaponRefinement, number>> = {
+  1: 0.008,
+  2: 0.01,
+  3: 0.012,
+  4: 0.014,
+  5: 0.016,
+};
+
+/** Additional Staff of Homa HP -> ATK ratios while below half HP. */
+const HOMA_LOW_HP_ATK_RATIO_BY_REFINEMENT: Readonly<
+  Record<WeaponRefinement, number>
+> = {
+  1: 0.01,
+  2: 0.012,
+  3: 0.014,
+  4: 0.016,
+  5: 0.018,
+};
 
 /**
  * A refinement row's grants, grouped by the damage-type scope they share.
@@ -179,6 +234,164 @@ function toEnemyModifier(
 }
 
 /**
+ * Homa is sourced as `unimplemented` because the generator cannot express its
+ * HP threshold in the generated row shape. The runtime condition vocabulary
+ * can express that threshold, so translate the complete passive here rather
+ * than applying only the unconditional HP grant or inventing 100% uptime.
+ */
+function homaBuffsForRefinement(
+  weaponId: string,
+  passiveName: string,
+  row: GeneratedWeaponRefinement,
+): readonly Buff[] {
+  if (weaponId !== "staffofhoma") return [];
+
+  const ratio = HOMA_ATK_RATIO_BY_REFINEMENT[row.refinement];
+  const lowHpRatio = HOMA_LOW_HP_ATK_RATIO_BY_REFINEMENT[row.refinement];
+  const baseId = `${weaponId}-r${row.refinement}`;
+  const base: Buff = {
+    id: baseId,
+    source: passiveName,
+    startTime: EQUIPMENT_BUFF_START_TIME,
+    duration: PERMANENT_DURATION,
+    stacking: { mode: "refresh" },
+    // Weapon stats belong to the wearer even while they are off field (for
+    // example, an off-field burst snapshot). The harvest step attaches the
+    // wearer id, so `self` keeps this passive on that character only.
+    targets: { scope: "self" },
+    modifiers: row.modifiers,
+    conversions: [{ sourceStat: "hp", targetStat: "atkFlat", ratio }],
+  };
+  const lowHp: Buff = {
+    id: `${baseId}-low-hp`,
+    source: passiveName,
+    startTime: EQUIPMENT_BUFF_START_TIME,
+    duration: PERMANENT_DURATION,
+    stacking: { mode: "refresh" },
+    targets: { scope: "self" },
+    conditions: { maxHpFractionExclusive: 0.5 },
+    conversions: [
+      { sourceStat: "hp", targetStat: "atkFlat", ratio: lowHpRatio },
+    ],
+  };
+  return [base, lowHp];
+}
+
+/**
+ * Mistsplitter's unconditional grant and three independently gated Emblem
+ * stacks. Stack acquisition lives in `mistsplitterStateEffectsForRefinement`;
+ * these buffs only read the resulting per-wearer resources.
+ */
+function mistsplitterBuffsForRefinement(
+  weaponId: string,
+  passiveName: string,
+  row: GeneratedWeaponRefinement,
+): readonly Buff[] {
+  if (weaponId !== "mistsplitterreforged") return [];
+  const value = MISTSPLITTER_ALL_ELEMENT_BONUS_BY_REFINEMENT[row.refinement];
+  const stackValues = MISTSPLITTER_EMBLEM_BONUS_BY_REFINEMENT[row.refinement];
+  const stackConditions = (resourceId: string) => ({
+    resources: [{ resourceId, comparator: "gte" as const, value: 1 }],
+  });
+  const stackBuffs = (
+    id: string,
+    resourceId: string,
+    stackValue: number,
+  ): readonly Buff[] =>
+    ELEMENTAL_TYPES.map((element) => ({
+      id: `${id}-${element}`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" as const },
+      targets: { scope: "self" as const },
+      conditions: {
+        ...stackConditions(resourceId),
+        elements: [element],
+      },
+      modifiers: [{
+        stat: "elementalDmgBonus" as const,
+        element,
+        value: stackValue,
+      }],
+    }));
+  const energyStackBuffs = ELEMENTAL_TYPES.map((element) => ({
+    id: `${weaponId}-r${row.refinement}-emblem-energy-${element}`,
+    source: passiveName,
+    startTime: EQUIPMENT_BUFF_START_TIME,
+    duration: PERMANENT_DURATION,
+    stacking: { mode: "refresh" as const },
+    targets: { scope: "self" as const },
+    conditions: {
+      requiresEnergyBelowMax: true,
+      elements: [element],
+    },
+    modifiers: [{
+      stat: "elementalDmgBonus" as const,
+      element,
+      value: stackValues[2],
+    }],
+  }));
+  return [
+    {
+      id: `${weaponId}-r${row.refinement}-all-elements`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      modifiers: ELEMENTAL_TYPES.map((element) => ({
+        stat: "elementalDmgBonus" as const,
+        element,
+        value,
+      })),
+    },
+    ...stackBuffs(
+      `${weaponId}-r${row.refinement}-emblem-normal`,
+      "mistsplitter-emblem-normal",
+      stackValues[0],
+    ),
+    ...stackBuffs(
+      `${weaponId}-r${row.refinement}-emblem-burst`,
+      "mistsplitter-emblem-burst",
+      stackValues[1],
+    ),
+    ...energyStackBuffs,
+  ];
+}
+
+/** Event-driven Mistsplitter stack acquisition rules. */
+function mistsplitterStateEffectsForRefinement(
+  weaponId: string,
+): readonly WeaponStateEffectTemplate[] {
+  if (weaponId !== "mistsplitterreforged") return [];
+  return [
+    {
+      kind: "resourceOnTrigger",
+      resourceId: "mistsplitter-emblem-normal",
+      trigger: "damageDealt",
+      value: 1,
+      actionTypes: ["normal", "charged"],
+      elements: ELEMENTAL_TYPES,
+      durationSeconds: 5,
+      cooldownSeconds: 0,
+      maxStacks: 1,
+      stackMode: "refresh",
+    },
+    {
+      kind: "resourceOnTrigger",
+      resourceId: "mistsplitter-emblem-burst",
+      trigger: "burstCast",
+      value: 1,
+      durationSeconds: 10,
+      cooldownSeconds: 0,
+      maxStacks: 1,
+      stackMode: "refresh",
+    },
+  ];
+}
+
+/**
  * The buffs one refinement row grants, one per distinct damage-type scope.
  *
  * A row outside the `expressible` bucket yields `[]` -- see rule 1 above.
@@ -194,6 +407,14 @@ export function buffsForRefinement(
   passiveName: string,
   row: GeneratedWeaponRefinement,
 ): readonly Buff[] {
+  const homa = homaBuffsForRefinement(weaponId, passiveName, row);
+  if (homa.length > 0) return homa;
+  const mistsplitter = mistsplitterBuffsForRefinement(
+    weaponId,
+    passiveName,
+    row,
+  );
+  if (mistsplitter.length > 0) return mistsplitter;
   if (row.bucket !== EXPRESSIBLE_BUCKET) return [];
 
   // Insertion-ordered: modifiers, then conversions, then enemy modifiers, each
@@ -234,7 +455,11 @@ export function buffsForRefinement(
       // because it requires `sourceCharacterId`, and the harvest is already
       // per-character -- the buff reaches exactly the character whose
       // equipment entry produced it.
-      targets: { scope: "active" },
+      // A weapon's stat/passive belongs to its wearer even when the wearer is
+      // off field. The harvest step attaches sourceCharacterId, so `self`
+      // prevents party leakage while keeping snapshots and coordinated hits
+      // correctly buffed.
+      targets: { scope: "self" },
     };
     if (group.damageTypes) buff.conditions = { damageTypes: group.damageTypes };
     if (group.modifiers.length > 0) buff.modifiers = group.modifiers;
@@ -267,6 +492,9 @@ export function weaponPassiveBuffs(
   if (!passive) return undefined;
 
   const byRefinement: Partial<Record<WeaponRefinement, readonly Buff[]>> = {};
+  const stateEffectsByRefinement: Partial<
+    Record<WeaponRefinement, readonly WeaponStateEffectTemplate[]>
+  > = {};
   let any = false;
   // Ascending refinement, so the emitted key order is fixed.
   for (const row of [...passive.refinements].sort(
@@ -275,11 +503,19 @@ export function weaponPassiveBuffs(
     const buffs = buffsForRefinement(weapon.id, passive.name, row);
     if (buffs.length === 0) continue;
     byRefinement[row.refinement] = buffs;
+    const stateEffects = mistsplitterStateEffectsForRefinement(weapon.id);
+    if (stateEffects.length > 0) stateEffectsByRefinement[row.refinement] = stateEffects;
     any = true;
   }
   if (!any) return undefined;
 
-  return { name: passive.name, buffsByRefinement: byRefinement };
+  return {
+    name: passive.name,
+    buffsByRefinement: byRefinement,
+    ...(Object.keys(stateEffectsByRefinement).length > 0
+      ? { stateEffectsByRefinement }
+      : {}),
+  };
 }
 
 /** Same as {@link weaponPassiveBuffs}, by weapon id. Unknown id -> undefined. */

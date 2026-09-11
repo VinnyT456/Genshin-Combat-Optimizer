@@ -1,4 +1,10 @@
 import { REFINEMENTS, type Refinement } from "@/features/team-builder/weaponPresentation";
+import type {
+  ArtifactLoadout,
+  EquipmentStat,
+  EquipmentStatKey,
+} from "@/simulation/character/equipment";
+import { ARTIFACT_SLOTS } from "@/simulation/character/equipment";
 
 // ---------------------------------------------------------------------------
 // The user's equipment CHOICES, as a plain serializable value.
@@ -30,12 +36,72 @@ import { REFINEMENTS, type Refinement } from "@/features/team-builder/weaponPres
 // selects, merges and validates the user's choices.
 // ---------------------------------------------------------------------------
 
-/** Artifact piece counts a set bonus can be equipped at. */
-export const ARTIFACT_PIECE_COUNTS = [1, 2, 4] as const;
+/** Artifact piece counts supported by the editor, including mixed loadouts. */
+export const ARTIFACT_PIECE_COUNTS = [1, 2, 3, 4, 5] as const;
 export type ArtifactPieceCount = (typeof ARTIFACT_PIECE_COUNTS)[number];
 
 /** Refinement a newly equipped weapon is assumed to be at until chosen. */
 export const DEFAULT_REFINEMENT: Refinement = 1;
+
+/** Weapon level assumed when an older saved selection has no level field. */
+export const DEFAULT_WEAPON_LEVEL = 90;
+export const MIN_WEAPON_LEVEL = 1;
+export const MAX_WEAPON_LEVEL = 90;
+
+const EQUIPMENT_STAT_KEYS: readonly EquipmentStatKey[] = [
+  "atkPercent",
+  "hpPercent",
+  "defPercent",
+  "atkFlat",
+  "hpFlat",
+  "defFlat",
+  "elementalMastery",
+  "critRate",
+  "critDmg",
+  "energyRecharge",
+  "dmgBonus",
+  "elementalDmgBonus",
+];
+
+function parseEquipmentStat(value: unknown): EquipmentStat | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const stat = record.stat;
+  const amount = record.value;
+  if (
+    typeof stat !== "string" ||
+    !EQUIPMENT_STAT_KEYS.includes(stat as EquipmentStatKey) ||
+    typeof amount !== "number" ||
+    !Number.isFinite(amount)
+  ) {
+    return undefined;
+  }
+  if (stat === "elementalDmgBonus") {
+    const element = record.element;
+    if (
+      element !== "pyro" &&
+      element !== "hydro" &&
+      element !== "electro" &&
+      element !== "cryo" &&
+      element !== "anemo" &&
+      element !== "geo" &&
+      element !== "dendro" &&
+      element !== "physical"
+    ) {
+      return undefined;
+    }
+    return { stat, value: amount, element };
+  }
+  return { stat: stat as Exclude<EquipmentStatKey, "elementalDmgBonus">, value: amount };
+}
+
+export function isWeaponLevel(value: number): boolean {
+  return (
+    Number.isInteger(value) &&
+    value >= MIN_WEAPON_LEVEL &&
+    value <= MAX_WEAPON_LEVEL
+  );
+}
 
 /**
  * Piece count a newly equipped set is assumed to be at.
@@ -53,10 +119,14 @@ export interface CharacterEquipmentSelection {
   readonly weaponId?: string;
   /** Owned refinement of `weaponId`. Meaningless without it. */
   readonly refinement?: Refinement;
-  /** Equipped artifact SET id. `null`/absent means no set. */
+  /** Current level of `weaponId`; omitted legacy entries mean level 90. */
+  readonly weaponLevel?: number;
+  /** Primary artifact SET id for legacy summaries. Mixed loadouts use each piece's `setId`. */
   readonly artifactSetId?: string | null;
-  /** How many pieces of `artifactSetId` are worn. */
+  /** Number of pieces belonging to `artifactSetId` for legacy summaries. */
   readonly artifactPieces?: ArtifactPieceCount;
+  /** Fixed main/substats for each equipped piece. Each piece may use a different set. */
+  readonly artifactLoadout?: ArtifactLoadout;
 }
 
 /** The whole team's equipment choices, keyed by character id. */
@@ -120,8 +190,13 @@ export function equipWeapon(
   characterId: string,
   weaponId: string,
   refinement: Refinement = DEFAULT_REFINEMENT,
+  weaponLevel: number = DEFAULT_WEAPON_LEVEL,
 ): EquipmentSelections {
-  return withSelection(selections, characterId, { weaponId, refinement });
+  return withSelection(selections, characterId, {
+    weaponId,
+    refinement,
+    ...(isWeaponLevel(weaponLevel) ? { weaponLevel } : {}),
+  });
 }
 
 /** Equips an artifact set, or clears it with `null`. */
@@ -130,10 +205,59 @@ export function equipArtifactSet(
   characterId: string,
   artifactSetId: string | null,
   pieces: ArtifactPieceCount = DEFAULT_ARTIFACT_PIECES,
+  artifactLoadout?: ArtifactLoadout,
 ): EquipmentSelections {
+  if (artifactSetId === null) {
+    const current = selectionFor(selections, characterId);
+    const rest = { ...current };
+    delete rest.artifactPieces;
+    delete rest.artifactLoadout;
+    return { ...selections, [characterId]: { ...rest, artifactSetId: null } };
+  }
   return withSelection(selections, characterId, {
     artifactSetId,
-    ...(artifactSetId === null ? {} : { artifactPieces: pieces }),
+    artifactPieces: pieces,
+    ...(artifactLoadout === undefined ? {} : { artifactLoadout }),
+  });
+}
+
+/**
+ * Saves a five-slot artifact loadout. The legacy set id/count fields are kept
+ * as a stable summary for existing cards and persisted builds; the simulation
+ * reads every piece in `artifactLoadout` when present.
+ */
+export function equipArtifactLoadout(
+  selections: EquipmentSelections,
+  characterId: string,
+  artifactLoadout: ArtifactLoadout,
+): EquipmentSelections {
+  const pieces = ARTIFACT_SLOTS.map((slot) => artifactLoadout[slot]).filter(
+    (piece): piece is NonNullable<typeof piece> => piece !== undefined,
+  );
+  if (pieces.length === 0) {
+    return equipArtifactSet(selections, characterId, null);
+  }
+
+  // Legacy cards still need one set/count summary. Pick the set with the most
+  // equipped pieces so a 4+1 build remains labelled by its four-piece set,
+  // even when the off-piece occupies the first slot (usually the flower).
+  const counts = new Map<string, number>();
+  for (const piece of pieces) counts.set(piece.setId, (counts.get(piece.setId) ?? 0) + 1);
+  let primarySetId = pieces[0]!.setId;
+  let primaryCount = counts.get(primarySetId) ?? 0;
+  for (const slot of ARTIFACT_SLOTS) {
+    const setId = artifactLoadout[slot]?.setId;
+    if (!setId) continue;
+    const count = counts.get(setId) ?? 0;
+    if (count > primaryCount) {
+      primarySetId = setId;
+      primaryCount = count;
+    }
+  }
+  return withSelection(selections, characterId, {
+    artifactSetId: primarySetId,
+    artifactPieces: primaryCount as ArtifactPieceCount,
+    artifactLoadout,
   });
 }
 
@@ -146,6 +270,16 @@ export function setRefinement(
   return withSelection(selections, characterId, { refinement });
 }
 
+/** Changes the level of an already-equipped weapon. */
+export function setWeaponLevel(
+  selections: EquipmentSelections,
+  characterId: string,
+  weaponLevel: number,
+): EquipmentSelections {
+  if (!isWeaponLevel(weaponLevel)) return selections;
+  return withSelection(selections, characterId, { weaponLevel });
+}
+
 /** Changes how many pieces of the equipped set are worn. */
 export function setArtifactPieces(
   selections: EquipmentSelections,
@@ -153,6 +287,27 @@ export function setArtifactPieces(
   pieces: ArtifactPieceCount,
 ): EquipmentSelections {
   return withSelection(selections, characterId, { artifactPieces: pieces });
+}
+
+/** Counts each set in a mixed five-slot loadout in deterministic set-id order. */
+export function artifactSetCounts(
+  loadout: ArtifactLoadout | undefined,
+): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const slot of ["flower", "plume", "sands", "goblet", "circlet"] as const) {
+    const setId = loadout?.[slot]?.setId;
+    if (setId) counts[setId] = (counts[setId] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Human-readable combination label such as `2+2`, `4+1`, or `1+1+1+1+1`. */
+export function artifactCombinationLabel(
+  loadout: ArtifactLoadout | undefined,
+): string | undefined {
+  const counts = Object.values(artifactSetCounts(loadout));
+  if (counts.length <= 1) return undefined;
+  return counts.sort((a, b) => b - a).join("+");
 }
 
 /**
@@ -243,8 +398,10 @@ export function parseSelections(
     const selection: {
       weaponId?: string;
       refinement?: Refinement;
+      weaponLevel?: number;
       artifactSetId?: string | null;
       artifactPieces?: ArtifactPieceCount;
+      artifactLoadout?: ArtifactLoadout;
     } = {};
 
     if (typeof fields.weaponId === "string" && isKnownWeaponId(fields.weaponId)) {
@@ -255,20 +412,58 @@ export function parseSelections(
         typeof fields.refinement === "number" && isRefinementValue(fields.refinement)
           ? fields.refinement
           : DEFAULT_REFINEMENT;
+      selection.weaponLevel =
+        typeof fields.weaponLevel === "number" && isWeaponLevel(fields.weaponLevel)
+          ? fields.weaponLevel
+          : DEFAULT_WEAPON_LEVEL;
     }
 
-    if (fields.artifactSetId === null) {
-      selection.artifactSetId = null;
-    } else if (
-      typeof fields.artifactSetId === "string" &&
-      isKnownSetId(fields.artifactSetId)
+    const rawArtifactSetId = fields.artifactSetId;
+    if (rawArtifactSetId === null) selection.artifactSetId = null;
+    else if (typeof rawArtifactSetId === "string" && isKnownSetId(rawArtifactSetId)) {
+      selection.artifactSetId = rawArtifactSetId;
+    }
+
+    if (
+      typeof fields.artifactPieces === "number" &&
+      isArtifactPieceCount(fields.artifactPieces)
     ) {
-      selection.artifactSetId = fields.artifactSetId;
-      selection.artifactPieces =
-        typeof fields.artifactPieces === "number" &&
-        isArtifactPieceCount(fields.artifactPieces)
-          ? fields.artifactPieces
-          : DEFAULT_ARTIFACT_PIECES;
+      selection.artifactPieces = fields.artifactPieces;
+    }
+
+    if (typeof fields.artifactLoadout === "object" && fields.artifactLoadout !== null) {
+      const loadout: ArtifactLoadout = {};
+      for (const slot of ["flower", "plume", "sands", "goblet", "circlet"] as const) {
+        const rawPiece = (fields.artifactLoadout as Record<string, unknown>)[slot];
+        if (typeof rawPiece !== "object" || rawPiece === null) continue;
+        const piece = rawPiece as Record<string, unknown>;
+        if (
+          typeof piece.setId !== "string" ||
+          !isKnownSetId(piece.setId) ||
+          piece.slot !== slot
+        ) continue;
+        const mainStat = parseEquipmentStat(piece.mainStat);
+        if (mainStat === undefined) continue;
+        const substats = Array.isArray(piece.substats)
+          ? piece.substats
+              .map(parseEquipmentStat)
+              .filter((value): value is NonNullable<typeof value> => value !== undefined)
+          : [];
+        loadout[slot] = { slot, setId: piece.setId, mainStat, substats };
+      }
+      if (Object.keys(loadout).length > 0) {
+        selection.artifactLoadout = loadout;
+        if (selection.artifactSetId === undefined) {
+          const first = Object.values(loadout)[0];
+          if (first) selection.artifactSetId = first.setId;
+        }
+        if (selection.artifactPieces === undefined && selection.artifactSetId) {
+          const count = Object.values(loadout).filter(
+            (piece) => piece?.setId === selection.artifactSetId,
+          ).length;
+          if (count > 0) selection.artifactPieces = count as ArtifactPieceCount;
+        }
+      }
     }
 
     if (Object.keys(selection).length > 0) out[characterId] = selection;

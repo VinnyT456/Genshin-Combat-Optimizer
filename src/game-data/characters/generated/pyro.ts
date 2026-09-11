@@ -2209,7 +2209,7 @@ export const gaming: GeneratedCharacter = {
     { level: 3, id: "gaming-c3", name: "Awakening Spirit", effects: [], buffs: [{ id: "gaming-c3", source: "Awakening Spirit", sourceCharacterId: "gaming", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "skill", levels: 3 }] }] },
     { level: 4, id: "gaming-c4", name: "Soar Across Mountains", effects: [] },
     { level: 5, id: "gaming-c5", name: "Evil-Daunting Roar", effects: [], buffs: [{ id: "gaming-c5", source: "Evil-Daunting Roar", sourceCharacterId: "gaming", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "burst", levels: 3 }] }] },
-    { level: 6, id: "gaming-c6", name: "To Tame All Beasts", effects: [] },
+    { level: 6, id: "gaming-c6", name: "To Tame All Beasts", effects: [], buffs: [{ id: "gaming-c6", source: "To Tame All Beasts", sourceCharacterId: "gaming", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, conditions: { damageTypes: ["plunge"] }, modifiers: [{ stat: "critRate", value: 0.2 }, { stat: "critDmg", value: 0.4 }] }] },
   ],
   resources: [],
 };

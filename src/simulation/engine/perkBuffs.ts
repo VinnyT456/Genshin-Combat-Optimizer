@@ -84,8 +84,8 @@ export function harvestTeamPerkBuffs(
  * unchanged, so runs that had no perks are byte-identical to before.
  *
  * All three channels are wired from ONE list because a perk buff may carry any
- * of them; today the emitted roster uses only `talentLevelModifiers`, and the
- * other two channels contribute nothing rather than being special-cased.
+ * of them. Generated unconditional perk rows can contribute talent levels,
+ * stat modifiers, conversions, or enemy modifiers through the same path.
  */
 export function withPerkBuffs(
   team: readonly (CharacterDefinition | GenericCharacterDefinition)[],

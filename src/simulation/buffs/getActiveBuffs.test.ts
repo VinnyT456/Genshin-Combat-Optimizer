@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AbilityDefinition, CharacterDefinition, SimulationSnapshot } from "@/types";
 import { testPyro } from "@/game-data/characters/testPyro";
+import { testEnemy } from "@/game-data/enemies/testEnemy";
 import { getActiveBuffs } from "@/simulation/buffs/getActiveBuffs";
 import type { Buff, BuffState } from "@/simulation/buffs/types";
 
@@ -52,6 +53,25 @@ describe("getActiveBuffs — activation window", () => {
   it("treats non-positive duration as inert", () => {
     expect(getActiveBuffs(0, state([buff({ duration: 0 })]), query())).toHaveLength(0);
     expect(getActiveBuffs(0, state([buff({ duration: -1 })]), query())).toHaveLength(0);
+  });
+
+  it("keeps a snapshot buff active for later hits after it expires live", () => {
+    const snapshot: SimulationSnapshot = { time: 0, characters: {} };
+    const s = state(
+      [buff({ duration: 3, snapshotMode: "snapshot" })],
+      snapshot,
+    );
+
+    expect(getActiveBuffs(0, s, query())).toHaveLength(1);
+    expect(getActiveBuffs(5, s, query())).toHaveLength(1);
+  });
+
+  it("re-evaluates a dynamic buff at each hit", () => {
+    const snapshot: SimulationSnapshot = { time: 0, characters: {} };
+    const s = state([buff({ duration: 3, snapshotMode: "dynamic" })], snapshot);
+
+    expect(getActiveBuffs(0, s, query())).toHaveLength(1);
+    expect(getActiveBuffs(5, s, query())).toHaveLength(0);
   });
 });
 
@@ -150,6 +170,69 @@ describe("getActiveBuffs — conditions", () => {
   it("fails closed on an energy gate with no snapshot", () => {
     const s = state([buff({ conditions: { minEnergyFraction: 0 } })]);
     expect(getActiveBuffs(0, s, query(testPyro))).toHaveLength(0);
+  });
+
+  it("requires current energy to be strictly below maximum", () => {
+    const belowMax: SimulationSnapshot = {
+      time: 0,
+      characters: {
+        [testPyro.id]: {
+          characterId: testPyro.id,
+          energy: { current: 59, max: 60, totalGained: 59, totalSpent: 0 },
+          cooldowns: {},
+        },
+      },
+    };
+    const full: SimulationSnapshot = {
+      ...belowMax,
+      characters: {
+        [testPyro.id]: {
+          ...belowMax.characters[testPyro.id]!,
+          energy: { current: 60, max: 60, totalGained: 60, totalSpent: 0 },
+        },
+      },
+    };
+    const gated = (snapshot: SimulationSnapshot) =>
+      getActiveBuffs(
+        0,
+        state([buff({ conditions: { requiresEnergyBelowMax: true } })], snapshot),
+        query(testPyro),
+      );
+    expect(gated(belowMax)).toHaveLength(1);
+    expect(gated(full)).toHaveLength(0);
+    expect(
+      getActiveBuffs(0, state([buff({ conditions: { requiresEnergyBelowMax: true } })]), query(testPyro)),
+    ).toHaveLength(0);
+  });
+
+  it("supports strict enemy and character HP thresholds", () => {
+    const snapshot: SimulationSnapshot = {
+      time: 0,
+      characters: {
+        [testPyro.id]: {
+          characterId: testPyro.id,
+          energy: { current: 0, max: 60, totalGained: 0, totalSpent: 0 },
+          cooldowns: {},
+          currentHp: 50,
+          maxHp: 100,
+        },
+      },
+    };
+    const enemy = { ...testEnemy, id: "threshold-enemy", currentHp: 50, maxHp: 100 };
+    expect(
+      getActiveBuffs(
+        0,
+        state([buff({ conditions: { minEnemyHpFractionExclusive: 0.5 } })], snapshot),
+        { ...query(testPyro), enemy },
+      ),
+    ).toHaveLength(0);
+    expect(
+      getActiveBuffs(
+        0,
+        state([buff({ conditions: { maxHpFractionExclusive: 0.5 } })], snapshot),
+        query(testPyro),
+      ),
+    ).toHaveLength(0);
   });
 });
 

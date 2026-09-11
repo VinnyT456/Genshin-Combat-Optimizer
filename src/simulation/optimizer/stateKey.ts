@@ -98,7 +98,7 @@ function characterKey(snapshot: CharacterSnapshot): string {
     parts.push(
       `${stableStringify(snapshot.activeStance.stance)}@${q(
         snapshot.activeStance.startTime,
-      )}`,
+      )}@${stableStringify(snapshot.activeStance.resourceSnapshots ?? null)}`,
     );
   }
 

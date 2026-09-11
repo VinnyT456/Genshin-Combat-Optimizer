@@ -57,6 +57,17 @@ weapon refinement and artifact set-piece selections become
 `SimulationConfig.equippedStats` and `equipmentBuffs`; the engine remains
 unaware of picker state or artifact records. Modelled weapon passives and
 artifact tiers are harvested with the same buff resolver as character perks.
+The team builder persists weapon level (1–90), refinement (R1–R5), and
+character level alongside the build. Weapon base ATK and secondary stats are
+read from the generated level curves, while character HP/ATK/DEF are replaced
+from the generated character curve when the level selector changes. Starter
+weapons shown on the team cards are also written into the initial equipment
+selection, so the first panel and first simulation share one deterministic
+state. Artifact pieces accept authored main/substats; zero-valued placeholder
+pieces remain available for set-tier counting without inventing gear values.
+Weapon browsing is separate from weapon configuration: `WeaponPicker` only
+filters and selects a card, then `WeaponDetailsPanel` edits level and
+refinement before confirming the selection back to the team builder.
 `completeSetBonusBuffs.ts` compiles deterministic, damage-relevant four-piece
 effects (including reaction bonuses, aura/HP/weapon gates, DEF/RES shred, ER
 conversion and deterministic expected proc damage) into the same `Buff`
@@ -93,6 +104,16 @@ level. Constellation talent-level deltas resolve once per cast and clamp the
 resulting level to the authored table range. Active constellation stat, enemy,
 reaction and energy channels retain their declared target scope and are gated
 through `activeConstellations()`; no C1–C6 row is active at C0.
+
+Raiden Shogun has a runtime kit overlay in
+`game-data/characters/kits/raidenShogunDefinition.ts`. Resolve gains from party
+bursts, C2 DEF ignore, C4 state-end ATK, C6 hit-gated cooldown reduction, and
+C3/C5 talent levels all enter through declarative seams. The generic kit also
+supports `DamageInstanceDefinition.resourceScaling`: a burst can capture a
+resource value, consume it, and carry the captured value through a stance. The
+captured resource is serialized in `ActiveStanceState` and included in the
+optimizer state key so snapshot/resume and beam-search transpositions remain
+damage-equivalent.
 
 The current website search adapter is synchronous. The frontend search panel
 exposes honest bounded-search disclosures and a run-token guard, but real
@@ -206,3 +227,18 @@ EM, reactions, DEF/RES shred, multi-target, swap timing, particles/ER.
 
 No RNG anywhere in the simulation path. Same inputs → identical outputs. This is
 a hard requirement so the optimizer search is stable and tests are exact.
+
+## National runtime overlays (2026-09-10)
+
+The adapter converts legacy National roster entries into generic definitions
+before simulation. Bennett's post-cast field, Xiangling's interval Pyronado,
+and Xingqiu's Normal-Attack-triggered Raincutter are expressed through the
+serialisable `KitAbility.buffs`, `StanceDefinition.triggers`, and generic
+trigger lifecycle. Source-Base-ATK buffs are materialised into target flat ATK
+at cast time. The legacy permanent National compatibility buff list is not
+composed by `runSimulation`, preventing duplicate or infinite constellation
+windows. Unsupported Xingqiu C6 proc variants and triggered-hit energy remain
+explicitly source-blocked. Follow-up audit priorities include Raiden party
+energy restoration, Bennett C6 infusion, non-Pyro resonance channels,
+character-defense consumption, crystallize element events, multi-target state,
+particle pickup timing, Burning ticks, and shared post-hit hooks.

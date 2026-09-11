@@ -26,6 +26,8 @@ export type ArtifactRarity = 3 | 4 | 5;
 
 export interface ArtifactSetDefinition {
   readonly id: ArtifactSetId;
+  /** Numeric catalog id. Current game data allocates ids in release order. */
+  readonly setId?: number;
   readonly nameZh: string;         // Official Chinese name
   readonly nameEn: string;         // English (for search/reference only)
   readonly rarity: ArtifactRarity;

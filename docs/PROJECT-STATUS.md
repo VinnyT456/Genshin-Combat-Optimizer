@@ -169,6 +169,27 @@ blocking findings. Browser mobile and 200% zoom evidence remain unverified.
 
 No deployment, external account action or git commit was performed.
 
+### Raiden Shogun constellation runtime — 2026-09-10
+
+The first full character constellation overlay is now implemented for Raiden
+Shogun C1–C6. KQM references and the generated Lunaris/Project Amber talent
+rows establish Resolve gains, the seven-second Dreams stance, C2 DEF ignore,
+C4's post-stance party buff, C6's five-hit cooldown reduction, and the Resolve
+damage coefficients. Resolve is gained from teammate burst energy, capped at
+60, snapshotted when Raiden casts her burst, consumed at that cast, and carried
+through every stance hit. The snapshot survives resume and optimizer state-key
+deduplication.
+
+The reusable model is documented in
+[RAIDEN-CONSTELLATION-MODEL.md](design/RAIDEN-CONSTELLATION-MODEL.md). Focused
+Raiden runtime, gameplay, kit, lifecycle, presentation and adapter tests pass;
+strict typecheck, lint, production build and `git diff --check` pass. The full
+suite is green when run in isolation; two unrelated 5-second DOM timeouts can
+occur under the concurrent full-suite load, and both pass on focused rerun. The
+presentation overlay marks all six Raiden constellations executable even while
+the generated provenance file awaits a future regeneration with the
+runtime-specific channels.
+
 ### Remaining artifact lifecycle effects — 2026-09-09
 
 Unfinished artifact rows now have runtime records. Character-side resistance,
@@ -797,6 +818,37 @@ resource events reduce the target's HP and trigger the corresponding artifact
 windows. Thundering Fury's skill cooldown reduction is represented as a
 deterministic reaction lifecycle effect.
 
+### Lunaris talent localization and progression hardening — 2026-09-09
+
+Two parallel Luna tasks completed the next Astra-plan slice. Lunaris `chs/char`
+data at version `7.0.54.2` now supplies Chinese combat-talent names and
+descriptions for all 132 generated characters; the character detail and team
+builder cards display this copy while retaining the existing 1–15 sourced
+level tables for simulation. Talent text is display-only and does not replace
+the engine's numeric tables.
+
+The talent/constellation execution seam was audited end to end. Talent levels
+and constellation talent-level boosts still resolve into damage and cooldown
+lookups, while invalid or non-finite C-level input and malformed C0/C7 rows
+fail closed. Valid C0–C6 effects retain their authored target scope and cannot
+leak damage, reaction, enemy, or energy buffs to other characters. Focused
+localization, UI, talent, constellation, adapter, and reconciliation coverage
+passes; the full suite currently reports 2,525 passing tests.
+
+### Structured constellation effects wired into damage — 2026-09-09
+
+The character generator now emits every verified, unconditional perk payload as
+an executable Buff on the owning character. This includes all 259 talent-level
+constellation boosts plus the seven direct stat/conversion rows (for example,
+Tighnari C1 charged-attack CRIT Rate and Gaming C6 plunge CRIT Rate/DMG). The
+existing perk harvester gates those buffs through the character's real ascension
+and C0–C6 state, then composes them with artifact, weapon, and caller-supplied
+resolvers. Damage-type scopes are preserved for direct stat effects; talent-level
+boosts remain slot-scoped so a normal-attack talent also covers its charged and
+plunging tables. An end-to-end roster test confirms Tighnari C1 changes charged
+attack damage, and malformed or unsupported prose remains excluded rather than
+being treated as an always-on bonus.
+
 ## Blocked
 
 - (none)
@@ -875,3 +927,80 @@ tab stops and worsen the traversal cost of Finding F).
 - **Phase 3** — mechanics: elemental aura + reactions (vaporize/melt/EC/overload/superconduct), ICD, DEF/RES shred, full damage pipeline (flat terms, non-ATK scaling, EM).
 - **Phase 4** — optimizer: beam search, Top-N rotations, objectives, ranking, explainability.
 - **Phase 5** — frontend/perf: rich timeline viz, rotation comparison, Web Worker offload, perf tuning.
+
+### National runtime fidelity and second audit — 2026-09-10
+
+The National sequence now uses generic runtime overlays for the highest-impact
+timed effects. Bennett's Fantastic Voyage creates a post-cast 12-second party
+field, uses Bennett's own Base ATK for the flat party bonus, respects the C0
+70% target-HP gate, adds C1's unconditional 20% Base ATK component, and carries
+C6's Pyro DMG bonus. Xiangling's Pyronado is an off-field 1.5-second interval
+field (10 seconds, or 14 seconds at C4) with cast-time snapshot pricing and
+Pyro application. Xingqiu's Raincutter registers Hydro sword-rain attacks on
+party Normal Attacks for 15 seconds (18 seconds at C2), applies C2's 4-second
+Hydro shred after a rain hit, and applies C4's 50% Skill bonus. These overlays
+are wired for both generic website characters and exported legacy presets; the
+adapter no longer composes the old permanent National compatibility buffs,
+which prevented duplicate and incorrectly infinite constellation effects.
+
+The lifecycle seam is generic: `onInterval` triggers, cast snapshots, runtime
+buff materialisation, and source-Base-ATK conversion are serialisable and do
+not branch on character ids inside the combat engine. Xingqiu C6's every-third
+rain enhancement and energy return remain explicitly described-only because
+the current trigger contract has no conditional proc variant or triggered-hit
+energy event.
+
+Two independent Luna audits compared the implementation with KQM, Genshin
+Wiki, Honey Impact/Lunaris and generated Project Amber data. Confirmed follow-up
+priorities are: Raiden legacy preset energy restoration and C6 field infusion;
+remaining non-Pyro resonance channels; character-defense/shield consumption;
+Archaic Petra crystallize element events; multi-target HP/aura/ICD state;
+particle spawn and pickup timing; Burning ticks; and shared post-hit hooks for
+coordinated attacks. Particle timing, simultaneous-aura priority, and
+source-blocked generated rows remain documented deterministic approximations
+until authoritative values and lifecycle seams are available.
+
+Validation for this cycle: full Vitest suite passed 164 files / 2,574 tests;
+strict TypeScript passed; focused Bennett, Xiangling, Xingqiu, National preset,
+engine-wiring and adapter suites passed; `git diff --check` passed. No commit or
+deployment was performed.
+
+### Build progression controls — 2026-09-10
+
+The team builder now carries character level, weapon level, refinement, and
+authored artifact piece stats through the same persisted equipment and
+simulation seams. Character level changes replace HP/ATK/DEF from the sourced
+per-level curve while preserving the selected weapon's exact level and
+secondary stat. Weapon cards and character panels show level-correct base ATK
+and secondary values; weapon passives continue to resolve by owned refinement.
+Starter weapons are seeded into the initial equipment state so the visible
+default build and its first simulation cannot disagree. Artifact stat editing
+uses zero-valued placeholders for set counting and reports only pieces with
+non-zero authored stats as configured. Full validation after this work:
+167 files / 2,592 tests, strict TypeScript, lint, production build, and
+`git diff --check` all passed.
+
+### Weapon selection and detail editor — 2026-09-10
+
+Weapon browsing is now selection-only. Clicking a card opens a dedicated
+detail surface where the user adjusts weapon level and refinement, reviews
+level-correct base ATK and secondary stats, and reads the Chinese passive
+description before confirming equipment. The list keeps a neutral level-90
+preview, while the confirmed values continue through the persisted selection
+and simulation adapter.
+
+### Weapon detail UX refinement — 2026-09-10
+
+The weapon detail surface now uses a responsive hero header, two-column desktop
+layout, exact stat cards, level slider plus numeric input, and a sticky action
+bar. Weapon cards are native keyboard-accessible buttons with result-count
+announcements, focus restoration after returning from details, and a one-column
+mobile layout. Missing exact base-ATK data renders as an explicit absence state
+and blocks confirmation instead of showing a level-90 substitute. Full Vitest,
+strict TypeScript, lint, production build, and diff checks pass.
+
+Dashboard character cards now show configured 普攻、战技、爆发 levels, including
+any engine-applied constellation talent-level boost. Clicking a card opens the
+existing character configuration surface for stats, talents, constellations,
+and level edits; nested weapon, artifact, and action controls keep their own
+click behavior.

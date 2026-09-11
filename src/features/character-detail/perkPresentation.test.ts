@@ -26,15 +26,15 @@ function perk(over: Partial<GeneratedPerkEffect> = {}): GeneratedPerkEffect {
 
 describe("perkPresentation — the four-row truth table", () => {
   // The two axes are INDEPENDENT. Collapsing them is UI-AUDIT-055 F2.
-  // A modelled flag alone is insufficient. Only the separately reconciled
-  // talent-level channel is connected through the website adapter.
-  it("non-talent effect modelled but unwired + prose present → described-only", () => {
-    expect(classifyPerk(perk({ support: "modelled" }), { descriptionZh: "中文" })).toBe(
-      "described-only",
+  // Every modelled payload is now emitted as an executable Buff; a modelled
+  // row with no payload is still rejected as malformed data.
+  it("structured stat effect + prose present → simulated", () => {
+    expect(classifyPerk(perk({ support: "modelled", modifiers: [{ stat: "critRate", value: 0.15 }] }), { descriptionZh: "中文" })).toBe(
+      "simulated",
     );
   });
 
-  it("non-talent effect modelled but unwired + prose absent → described-only", () => {
+  it("modelled effect with no executable payload → described-only", () => {
     expect(classifyPerk(perk({ support: "modelled" }), {})).toBe("described-only");
   });
 
@@ -122,14 +122,9 @@ describe("perkPresentation — honesty tripwires against live data", () => {
 
   // =========================================================================
   // REPLACEMENT for the retired tripwire "essentially no perk is modelled"
-  // (TASK #057). The old assertion was `modelled < 5% of all rows`, written
-  // when 7 of 1234 were modelled. It now fires at 266 — NOT a regression, but
-  // the project succeeding: mechanics built the talent-level buff channel,
-  // combat wired it (`SimulationConfig.talentLevelResolver` +
-  // `ConstellationDefinition.buffs`), and data emitted 259 talent-level
-  // boosts. Per this file's own standard the pin is REPLACED, not re-pinned
-  // at a higher threshold — a threshold that only tracks a growing number
-  // asserts nothing about the property worth protecting.
+  // (TASK #057). The generated roster now emits all 266 unconditional,
+  // structured rows as executable Buffs: 259 talent-level boosts plus seven
+  // direct stat/conversion effects.
   //
   // THE PROPERTY IS UNCHANGED: a user must never see a C-level number that is
   // really a C0 number. What changed is that the honest answer is no longer
@@ -137,7 +132,7 @@ describe("perkPresentation — honesty tripwires against live data", () => {
   // still say so for the 968". Both halves are asserted below.
   // =========================================================================
 
-  it("the talent-level boosts LANDED: 259 of 266 modelled perks carry one", () => {
+  it("all structured modelled perks carry an executable payload", () => {
     const modelled = generatedPerkEffects.filter((p) => p.support === "modelled");
     const withBoost = generatedPerkEffects.filter(
       (p) => p.talentLevelBoost !== undefined,
@@ -157,7 +152,7 @@ describe("perkPresentation — honesty tripwires against live data", () => {
       expect(perk.support).toBe("modelled");
     }
 
-    // 266 = 259 boosts + the 7 originally-expressible perks. Pinning the
+    // 266 = 259 boosts + the seven direct stat/conversion rows. Pinning the
     // decomposition means a future change has to say WHICH half moved.
     const modelledWithoutBoost = modelled.filter(
       (p) => p.talentLevelBoost === undefined,
@@ -214,7 +209,7 @@ describe("perkPresentation — honesty tripwires against live data", () => {
     }
   });
 
-  it("opens only the reconciled talent-level channel", () => {
+  it("opens every reconciled structured channel", () => {
     const boosts = generatedPerkEffects.filter((row) => row.talentLevelBoost !== undefined);
     expect(boosts).toHaveLength(259);
     expect(boosts.every((row) => classifyPerk(row) !== "described-only")).toBe(true);
@@ -223,7 +218,7 @@ describe("perkPresentation — honesty tripwires against live data", () => {
       (row) => row.support === "modelled" && row.talentLevelBoost === undefined,
     );
     expect(otherModelled).toHaveLength(7);
-    expect(otherModelled.every((row) => classifyPerk(row) === "described-only")).toBe(true);
+    expect(otherModelled.every((row) => classifyPerk(row) !== "described-only")).toBe(true);
   });
 
   it("every row the user can read is classified, never left unlabelled", () => {
@@ -234,6 +229,12 @@ describe("perkPresentation — honesty tripwires against live data", () => {
         expect(["simulated", "simulated-no-text", "described-only"]).toContain(row.kind);
       }
     }
+  });
+
+  it("uses the executable Raiden overlay for every constellation row", () => {
+    const rows = buildConstellationRows("raiden-shogun");
+    expect(rows).toHaveLength(6);
+    expect(rows.every((row) => row.kind !== "described-only")).toBe(true);
   });
 
   it("anyRowSimulated reflects a live reconciled constellation boost", () => {

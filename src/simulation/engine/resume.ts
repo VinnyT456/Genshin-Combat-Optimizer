@@ -62,6 +62,9 @@ export interface ResumedRunState {
   activeTriggers: readonly unknown[];
   /** Pending timed artifact events copied from checkpoint. */
   artifactEvents: readonly ArtifactScheduledEvent[];
+  /** Runtime buffs created before the checkpoint. */
+  runtimeBuffs: readonly unknown[];
+  artifactTriggerState: Readonly<Record<string, { lastTriggered: number; count: number }>>;
 }
 
 /**
@@ -111,6 +114,9 @@ export function restoreFromSnapshot(
       ? {
           stance: characterSnapshot.activeStance.stance,
           startTime: characterSnapshot.activeStance.startTime,
+          ...(characterSnapshot.activeStance.resourceSnapshots !== undefined
+            ? { resourceSnapshots: { ...characterSnapshot.activeStance.resourceSnapshots } }
+            : {}),
         }
       : undefined;
   }
@@ -126,5 +132,11 @@ export function restoreFromSnapshot(
         : entry,
     ) ?? [],
     artifactEvents: snapshot.artifactEvents?.map((event) => ({ ...event })) ?? [],
+    runtimeBuffs: snapshot.runtimeBuffs?.map((buff) =>
+      buff && typeof buff === "object" ? { ...(buff as Record<string, unknown>) } : buff,
+    ) ?? [],
+    artifactTriggerState: Object.fromEntries(
+      Object.entries(snapshot.artifactTriggerState ?? {}).map(([key, value]) => [key, { ...value }]),
+    ),
   };
 }

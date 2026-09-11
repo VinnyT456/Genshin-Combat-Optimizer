@@ -6,6 +6,7 @@ import unittest
 
 import emit
 import parse
+import perks
 
 
 def _ability(label: str = "Skill DMG") -> parse.ParsedAbility:
@@ -54,6 +55,45 @@ class TestWithholdUnverifiedAbilities(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("evidence missing", notes[0][1])
         self.assertIn("no Lunaris row", notes[0][1])
+
+
+class TestStructuredPerkBuff(unittest.TestCase):
+    def test_emits_direct_modifiers_with_damage_scope(self) -> None:
+        row = perks.ParsedPerk(
+            kind="constellation",
+            level=1,
+            unlock_ascension=None,
+            id_suffix="c1",
+            name="Charged Focus",
+            text="Charged Attack CRIT Rate is increased by 15%.",
+            bucket=perks.BUCKET_EXPRESSIBLE,
+            modifiers=(perks.ParsedModifier(stat="critRate", value=0.15),),
+            damage_types=("charged",),
+        )
+        buff = emit.emit_structured_perk_buff("test", row)
+        self.assertIsNotNone(buff)
+        assert buff is not None
+        self.assertIn('conditions: { damageTypes: ["charged"] }', buff)
+        self.assertIn('modifiers: [{ stat: "critRate", value: 0.15 }]', buff)
+        self.assertIn('targets: { scope: "self" }', buff)
+
+    def test_keeps_talent_boost_unscoped_by_hit_type(self) -> None:
+        row = perks.ParsedPerk(
+            kind="constellation",
+            level=3,
+            unlock_ascension=None,
+            id_suffix="c3",
+            name="Talent Crown",
+            text="Increases the Level of Normal Attack: Test by 3.",
+            bucket=perks.BUCKET_EXPRESSIBLE,
+            damage_types=("normal",),
+            talent_level_boost=("normal", 3),
+        )
+        buff = emit.emit_structured_perk_buff("test", row)
+        self.assertIsNotNone(buff)
+        assert buff is not None
+        self.assertNotIn("conditions:", buff)
+        self.assertIn('talentLevelModifiers: [{ slot: "normal", levels: 3 }]', buff)
 
 
 if __name__ == "__main__":

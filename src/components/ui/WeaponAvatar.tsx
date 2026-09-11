@@ -22,6 +22,13 @@ const SIZE_CLASSES = {
   xl: "h-14 w-14 text-lg",
 };
 
+const SIZE_PIXELS = {
+  sm: 32,
+  md: 40,
+  lg: 48,
+  xl: 56,
+} as const;
+
 export function WeaponAvatar({
   name,
   nameZh,
@@ -53,6 +60,8 @@ export function WeaponAvatar({
           loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
+          width={SIZE_PIXELS[size]}
+          height={SIZE_PIXELS[size]}
           onError={() => setLoadFailed(true)}
           className="h-full w-full object-contain p-0.5"
         />

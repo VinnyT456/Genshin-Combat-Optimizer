@@ -6,8 +6,13 @@ import {
   type ResolvedEquippedStats,
   resolveEquippedStats,
 } from "@/simulation/character/equipment";
-import { makeResolvers } from "@/simulation/buffs/makeBuffResolver";
-import { getRaidenNationalBuffs } from "@/game-data/characters/kits/raidenNationalKit";
+import { createBennettDefinition } from "@/game-data/characters/kits/bennettDefinition";
+import { createXingqiuDefinition } from "@/game-data/characters/kits/xingqiuDefinition";
+import {
+  createRaidenShogunDefinition,
+  raidenArtifactStateEffects,
+} from "@/game-data/characters/kits/raidenShogunDefinition";
+import { createXianglingDefinition } from "@/game-data/characters/kits/xianglingDefinition";
 import { equipmentConfig } from "@/features/simulation/equipmentAdapter";
 import type { EquipmentSelections } from "@/features/team-builder/equipmentSelection";
 import type {
@@ -106,13 +111,105 @@ export function isWebsiteCharacter(
 export function toEngineCharacter(
   character: CharacterDefinition | GenericCharacterDefinition | WebsiteCharacterDefinition,
 ): CharacterDefinition | GenericCharacterDefinition {
-  if (!isWebsiteCharacter(character)) return character;
+  if (!isWebsiteCharacter(character)) {
+    if (!("normalAttacks" in character) && character.id === "bennett") {
+      const adapted = createBennettDefinition(
+        character.constellation ?? 0,
+        character.talentLevels ?? { normal: 1, skill: 1, burst: 1 },
+        { level: character.level, baseStats: character.baseStats },
+      );
+      return {
+        ...adapted,
+        burst: { ...adapted.burst, energyCost: character.elementalBurst.energyCost },
+      };
+    }
+    if ("normalAttacks" in character && character.id === "bennett") {
+      const adapted = createBennettDefinition(
+        character.constellationLevel,
+        character.talentLevels,
+        { level: character.level, baseStats: character.baseStats },
+      );
+      return {
+        ...adapted,
+        burst: { ...adapted.burst, energyCost: character.burst.energyCost },
+      };
+    }
+    if (!("normalAttacks" in character) && character.id === "xingqiu") {
+      const adapted = createXingqiuDefinition(
+        character.constellation ?? 0,
+        character.talentLevels ?? { normal: 1, skill: 1, burst: 1 },
+        { level: character.level, baseStats: character.baseStats },
+      );
+      return {
+        ...adapted,
+        burst: { ...adapted.burst, energyCost: character.elementalBurst.energyCost },
+      };
+    }
+    if ("normalAttacks" in character && character.id === "xingqiu") {
+      const adapted = createXingqiuDefinition(
+        character.constellationLevel,
+        character.talentLevels,
+        { level: character.level, baseStats: character.baseStats },
+      );
+      return {
+        ...adapted,
+        burst: { ...adapted.burst, energyCost: character.burst.energyCost },
+      };
+    }
+    if (!("normalAttacks" in character) && character.id === "xiangling") {
+      const adapted = createXianglingDefinition(character.constellation ?? 0);
+      return {
+        ...adapted,
+        level: character.level,
+        baseStats: character.baseStats,
+        constellationLevel: character.constellation ?? adapted.constellationLevel,
+        talentLevels: character.talentLevels ?? adapted.talentLevels,
+        burst: { ...adapted.burst, energyCost: character.elementalBurst.energyCost },
+      };
+    }
+    if (
+      !("normalAttacks" in character) &&
+      (character.id === "raiden-shogun" || character.id === "raiden")
+    ) {
+      const selectedConstellation = character.constellation ?? 0;
+      const adapted = createRaidenShogunDefinition(selectedConstellation);
+      return {
+        ...adapted,
+        level: character.level,
+        baseStats: character.baseStats,
+        constellationLevel: selectedConstellation,
+        talentLevels: character.talentLevels ?? adapted.talentLevels,
+        burst: {
+          ...adapted.burst,
+          energyCost: character.elementalBurst.energyCost,
+        },
+      };
+    }
+    return character;
+  }
+  const selectedConstellation =
+    character.constellation ?? character.engineDefinition.constellationLevel;
+    const baseDefinition =
+    character.id === "raiden-shogun" || character.id === "raiden"
+      ? createRaidenShogunDefinition(selectedConstellation)
+      : character.id === "xiangling"
+        ? createXianglingDefinition(selectedConstellation)
+      : character.id === "bennett"
+        ? createBennettDefinition(
+            selectedConstellation,
+            character.talentLevels ?? character.engineDefinition.talentLevels,
+          )
+      : character.id === "xingqiu"
+        ? createXingqiuDefinition(
+            selectedConstellation,
+            character.talentLevels ?? character.engineDefinition.talentLevels,
+          )
+      : character.engineDefinition;
   return {
-    ...character.engineDefinition,
+    ...baseDefinition,
     level: character.level,
     baseStats: character.baseStats,
-    constellationLevel:
-      character.constellation ?? character.engineDefinition.constellationLevel,
+    constellationLevel: selectedConstellation,
     talentLevels:
       character.talentLevels ?? character.engineDefinition.talentLevels,
   };
@@ -151,13 +248,6 @@ export function runSimulation({
   config,
   equipment,
 }: RunSimulationInput): RunSimulationOutput {
-  const legacyTeam = team.filter(
-    (character): character is CharacterDefinition => "normalAttack" in character,
-  );
-  const nationalBuffs = getRaidenNationalBuffs(legacyTeam);
-  const autoResolvers =
-    nationalBuffs.length > 0 ? makeResolvers({ buffs: nationalBuffs }) : undefined;
-
   // The user's gear, translated into the two config fields the engine already
   // reads: `equippedStats` (what the gear is worth) and `equipmentBuffs` (the
   // weapon passives and set bonuses it carries). Built BEFORE the caller's
@@ -169,24 +259,34 @@ export function runSimulation({
         team.map((character) => ({
           id: character.id,
           stats: character.baseStats,
+          intrinsicStats: isWebsiteCharacter(character)
+            ? character.engineDefinition.baseStats
+            : character.baseStats,
         })),
         equipment,
       )
     : {};
 
+  const engineTeam = team.map(toEngineCharacter);
+  const autoArtifactStateEffects = engineTeam.flatMap((character) => {
+    if (!("normalAttacks" in character)) return [];
+    if (character.id !== "raiden-shogun" && character.id !== "raiden") return [];
+    return raidenArtifactStateEffects(character.id, character.constellationLevel);
+  });
+
   const mergedConfig: SimulationConfig = {
     ...UI_SIMULATION_CONFIG,
-    ...(autoResolvers
-      ? {
-          buffResolver: autoResolvers.buffResolver,
-          enemyModifierResolver: autoResolvers.enemyModifierResolver,
-        }
-      : {}),
     ...equipmentFields,
     ...config,
   };
+  if (autoArtifactStateEffects.length > 0) {
+    mergedConfig.artifactStateEffects = [
+      ...autoArtifactStateEffects,
+      ...(config?.artifactStateEffects ?? []),
+    ];
+  }
   return {
-    result: simulateRotation(team.map(toEngineCharacter), rotation, enemy, mergedConfig),
+    result: simulateRotation(engineTeam, rotation, enemy, mergedConfig),
     swapCostIsDefault: swapCostWasDefault(mergedConfig),
   };
 }

@@ -292,6 +292,53 @@ export function decayAuraState(state: AuraState, time: number): AuraState {
   return { auras: sortAuras(auras), compound };
 }
 
+/** Read one live compound aura at an absolute time. */
+export function findCompoundAura(
+  state: AuraState,
+  kind: CompoundAura["kind"],
+  time: number,
+): CompoundAura | undefined {
+  const aura = state.compound.find((candidate) => candidate.kind === kind);
+  if (!aura || isExpired(aura, time)) return undefined;
+  return advanceCompound(aura, sanitizeTime(time));
+}
+
+/** Replace or remove one compound aura while preserving other states. */
+export function withCompoundAura(
+  state: AuraState,
+  kind: CompoundAura["kind"],
+  aura: CompoundAura | undefined,
+): AuraState {
+  const others = state.compound.filter((candidate) => candidate.kind !== kind);
+  return {
+    auras: state.auras,
+    compound: aura === undefined ? others : [...others, aura],
+  };
+}
+
+/**
+ * Create a duration-backed compound aura.
+ *
+ * Quicken duration is authored as seconds, so a compound aura stores that
+ * duration as gauge with a one-second-per-gauge decay rate. This reuses the
+ * existing deterministic expiry machinery without adding a second timer model.
+ */
+export function createCompoundAura(
+  kind: CompoundAura["kind"],
+  durationSeconds: number,
+  time: number,
+): CompoundAura {
+  const safeDuration = Number.isFinite(durationSeconds)
+    ? Math.max(0, durationSeconds)
+    : 0;
+  return {
+    kind,
+    gauge: safeDuration,
+    since: sanitizeTime(time),
+    decayRate: 1,
+  };
+}
+
 /** Read one element's live aura at `time`, or undefined if none/expired. */
 export function findAura(
   state: AuraState,

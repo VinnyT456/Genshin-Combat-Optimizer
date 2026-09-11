@@ -37,8 +37,10 @@ function focusableWithin(root: HTMLElement): HTMLElement[] {
 export type DialogSize = "browse" | "detail" | "compact";
 
 const SIZE_CLASS: Record<DialogSize, string> = {
-  browse: "w-[96vw] max-w-7xl h-[88vh]",
-  detail: "w-[96vw] max-w-4xl h-[88vh]",
+  // Pickers use the full viewport on phones so filters, cards, and detail
+  // actions have room to breathe. Desktop keeps the bounded workbench shell.
+  browse: "h-[100dvh] w-full max-w-7xl sm:h-[90vh] sm:w-[96vw]",
+  detail: "h-[100dvh] w-full max-w-4xl sm:h-[90vh] sm:w-[96vw]",
   compact: "w-[96vw] max-w-lg",
 };
 
@@ -143,7 +145,7 @@ export function Dialog({
         aria-labelledby={titleId}
         onKeyDown={handleKeyDown}
         className={cn(
-          "relative flex max-h-[90vh] w-full flex-col overflow-hidden border border-surface-border bg-surface-raised shadow-xl shadow-black/70",
+          "relative flex max-h-[100dvh] w-full flex-col overflow-hidden border border-surface-border bg-surface-raised shadow-xl shadow-black/70",
           "rounded-t-xl sm:rounded-xl",
           SIZE_CLASS[size],
           className,

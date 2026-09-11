@@ -235,6 +235,8 @@ export type BuffTargetScope = "party" | "active" | "self" | "characters";
 
 export interface BuffTargets {
   scope: BuffTargetScope;
+  /** For party/active scopes, omit the buff owner from the target set. */
+  excludeSource?: boolean;
   /** Required when `scope === "characters"`. Ignored otherwise. */
   characterIds?: readonly string[];
 }
@@ -318,6 +320,8 @@ export interface BuffCondition {
   minEnergyFraction?: number;
   /** Energy gate, inclusive upper bound, as a fraction of max energy. */
   maxEnergyFraction?: number;
+  /** Only applies while current energy is strictly below the character's maximum. */
+  requiresEnergyBelowMax?: boolean;
   /**
    * Resource gates. ALL listed conditions must hold (logical AND), matching
    * the AND semantics of every other field on `BuffCondition`.
@@ -338,11 +342,17 @@ export interface BuffCondition {
   /** Enemy current HP fraction gates, when the scenario provides HP state. */
   minEnemyHpFraction?: number;
   maxEnemyHpFraction?: number;
+  /** Strict enemy HP fraction gates. */
+  minEnemyHpFractionExclusive?: number;
+  maxEnemyHpFractionExclusive?: number;
   /** Character weapon-type gate used by weapon-restricted artifact bonuses. */
   weaponTypes?: readonly ("sword" | "claymore" | "polearm" | "catalyst" | "bow")[];
   /** Character HP fraction gates, when the scenario provides HP state. */
   minHpFraction?: number;
   maxHpFraction?: number;
+  /** Strict character HP fraction gates. */
+  minHpFractionExclusive?: number;
+  maxHpFractionExclusive?: number;
   /** Shield-state gate for shield-dependent set bonuses. */
   requiresShield?: boolean;
 }
@@ -376,30 +386,23 @@ export interface BuffStacking {
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot semantics — OPEN DECISION, see docs/ARCHITECTURE.md
+// Snapshot semantics
 // ---------------------------------------------------------------------------
 
 /**
  * Whether a buff's contribution is captured when the ability is cast
  * (`snapshot`) or re-evaluated at each hit (`dynamic`).
  *
- * OPEN DECISION (raised to Manager, TASK #004): the project has not specified
- * which abilities snapshot. Both modes are representable here so that whichever
- * is decided requires only data changes, but the RESOLVER currently only
- * implements `dynamic` because the engine emits exactly one damage instance at
- * cast time — at which point snapshot and dynamic are indistinguishable.
- *
- * `snapshot` is therefore accepted and recorded but is NOT yet behaviourally
- * distinct. Do not rely on it until multi-hit / damage-over-time abilities
- * exist. See {@link UNSUPPORTED_SNAPSHOT_NOTE}.
+ * The engine reuses one cast-time `SimulationSnapshot` for every hit in a
+ * planned ability. The resolver uses that timestamp for snapshot buffs and
+ * the hit timestamp for dynamic buffs, so a snapshot contribution remains
+ * available across later hits even after its live window has ended.
  */
 export type BuffSnapshotMode = "dynamic" | "snapshot";
 
 export const UNSUPPORTED_SNAPSHOT_NOTE =
-  "Buff snapshot semantics are UNSPECIFIED in project docs. `snapshot` mode is " +
-  "accepted as data but behaves identically to `dynamic` because the engine " +
-  "currently emits one damage instance at cast time. Revisit when DoT / " +
-  "multi-hit abilities land.";
+  "Snapshot buffs are evaluated at the cast timestamp carried by the shared " +
+  "cast context; dynamic buffs are evaluated at each hit timestamp.";
 
 // ---------------------------------------------------------------------------
 // The buff itself
@@ -440,6 +443,15 @@ export interface Buff {
    * equivalent to `[]`.
    */
   modifiers?: readonly StatModifier[];
+  /**
+   * Optional percentage of the SOURCE character's base ATK to add as flat
+   * ATK to each target. This models effects such as Bennett's Burst, whose
+   * party bonus is derived from Bennett's Base ATK rather than the recipient's
+   * own base. The combat engine materialises this into an `atkFlat` modifier
+   * when the buff is created; persisted runtime buffs therefore remain plain
+   * data and deterministic.
+   */
+  sourceBaseAtkPercent?: number;
   /** Character-side elemental/physical RES modifiers, per stack. */
   resistanceModifiers?: readonly CharacterResistanceModifier[];
   /** Character-side shield strength modifiers, per stack. */
@@ -628,6 +640,8 @@ export interface StanceDefinition<TNormal = unknown, TAbility = unknown> {
   skill?: TAbility;
   /** Replacement burst while this stance is active. */
   burst?: TAbility;
+  /** Buffs applied when this stance naturally expires or is cancelled. */
+  stateEndBuffs?: readonly Buff[];
 }
 
 /**

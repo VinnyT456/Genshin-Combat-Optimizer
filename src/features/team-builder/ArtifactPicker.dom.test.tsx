@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { DEFAULT_ARTIFACT_PIECES } from "@/features/team-builder/equipmentSelection";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { allArtifacts } from "@/game-data/artifacts/registry";
 import { ArtifactPicker } from "./ArtifactPicker";
 
@@ -106,16 +105,18 @@ describe("ArtifactPicker is usable without images", () => {
     }
   });
 
-  it("still selects a set after every icon has failed", () => {
+  it("assigns a set when the full artifact card is activated", () => {
     const onSelect = vi.fn();
     renderPicker({ onSelect });
     for (let pass = 0; pass < 2; pass += 1) {
       for (const img of gridImages()) fireEvent.error(img);
     }
 
-    fireEvent.click(screen.getAllByRole("button", { name: "点击装配此套装" })[0]!);
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect.mock.calls[0]?.[0]).toHaveProperty("id");
+    const card = screen.getAllByRole("button", { name: /将.+配置到生之花/ })[0]!;
+    fireEvent.click(card);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(card).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("有未保存修改")).toBeInTheDocument();
   });
 });
 
@@ -163,28 +164,66 @@ describe("ArtifactPicker filtering drives the rendered grid", () => {
 });
 
 describe("ArtifactPicker marks the equipped set", () => {
-  it("offers to unequip the currently equipped set", () => {
-    const equipped = allArtifacts[0]!;
-    const onSelect = vi.fn();
-    renderPicker({ currentArtifactId: equipped.id, onSelect });
-
-    const unequip = screen.getByRole("button", { name: /当前装备中/ });
-    fireEvent.click(unequip);
-    // Unequipping passes null, not the set — the "clear the slot" contract.
-    // The piece count rides along on every select so the caller never has to
-    // reconstruct it; on an unequip it is simply ignored.
-    expect(onSelect).toHaveBeenCalledWith(null, DEFAULT_ARTIFACT_PIECES);
-  });
-
-  it("marks the equipped card with more than colour", () => {
+  it("marks the current set in the selected slot", () => {
     const equipped = allArtifacts[0]!;
     renderPicker({ currentArtifactId: equipped.id });
-    // A checkmark plus text, per the design system's never-colour-only rule.
-    expect(screen.getByRole("button", { name: /✓ 当前装备中/ })).toBeInTheDocument();
+    const card = screen.getByRole("button", { name: new RegExp(`将${equipped.nameZh}（\\d星）配置到生之花，当前选择`) });
+    expect(card).toHaveAttribute("aria-pressed", "true");
   });
 });
 
-describe("ArtifactPicker states its own ordering truthfully", () => {
+describe("ArtifactPicker saves mixed five-piece loadouts", () => {
+  it("allows independent sets and stats in every slot", () => {
+    const onSelect = vi.fn();
+    const first = allArtifacts[0]!;
+    const second = allArtifacts[1]!;
+    renderPicker({ onSelect });
+
+    const slots = ["flower", "plume", "sands", "goblet", "circlet"] as const;
+    const labels = { flower: "生之花", plume: "死之羽", sands: "时之沙", goblet: "空之杯", circlet: "理之冠" } as const;
+    for (const [index, slot] of slots.entries()) {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`${labels[slot]}，`) }));
+      const set = index % 2 === 0 ? first : second;
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`将${set.nameZh}`) }));
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: new RegExp("生之花，") }));
+    const flowerValue = screen.getAllByLabelText("主词条数值")[0] as HTMLInputElement;
+    fireEvent.change(flowerValue, { target: { value: "311" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    const [primary, primaryPieces, loadout] = onSelect.mock.calls[0] ?? [];
+    expect(primary).toHaveProperty("id", first.id);
+    expect(primaryPieces).toBe(3);
+    expect(Object.keys(loadout ?? {})).toHaveLength(5);
+    expect(loadout?.flower?.mainStat.value).toBe(311);
+    expect(loadout?.plume?.setId).toBe(second.id);
+  }, 15000);
+
+  it("supports one-click five-piece setup and a stat preset", () => {
+    const onSelect = vi.fn();
+    const set = allArtifacts[0]!;
+    renderPicker({ onSelect });
+
+    fireEvent.change(screen.getByLabelText("快速选择套装"), {
+      target: { value: set.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "五件同套" }));
+    fireEvent.click(screen.getByRole("button", { name: "套用模板" }));
+
+    expect(screen.getByLabelText("主词条数值")).toHaveValue(4780);
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    const [primary, pieces, loadout] = onSelect.mock.calls[0] ?? [];
+    expect(primary).toHaveProperty("id", set.id);
+    expect(pieces).toBe(5);
+    expect(Object.keys(loadout ?? {})).toHaveLength(5);
+    expect(loadout?.flower?.mainStat.value).toBe(4780);
+  });
+});
+
+describe("ArtifactPicker states its reverse chronological ordering", () => {
   it("does not render internal support status labels", () => {
     renderPicker();
     expect(screen.queryByText("已接入模拟")).toBeNull();
@@ -200,12 +239,16 @@ describe("ArtifactPicker states its own ordering truthfully", () => {
     expect(claimed).toBe(gridImages().length);
   });
 
-  it("renders cards in the rarity-then-name order the header claims", () => {
+  it("renders cards in descending catalog-id order", () => {
     const { container } = renderPicker();
-    const rarities = Array.from(container.querySelectorAll("article")).map((card) =>
-      within(card as HTMLElement).getByText(/^[345]★$/).textContent,
-    );
-    const descending = [...rarities].sort((a, b) => Number(b?.[0]) - Number(a?.[0]));
-    expect(rarities).toEqual(descending);
+    const ids = Array.from(container.querySelectorAll("article")).map((card) => {
+      const title = card.querySelector<HTMLElement>("[title]")?.getAttribute("title");
+      const set = allArtifacts.find((candidate) => candidate.nameZh === title);
+      return set?.setId;
+    });
+    const orderedIds = ids.filter((id): id is number => id !== undefined);
+    expect(orderedIds).toHaveLength(allArtifacts.length);
+    const sorted = [...orderedIds].sort((a, b) => b - a);
+    expect(orderedIds).toEqual(sorted);
   });
 });

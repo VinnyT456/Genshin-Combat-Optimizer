@@ -49,6 +49,37 @@ describe("generic character definition", () => {
     expect(activeConstellations(c0)).toEqual([]);
   });
 
+  it("fails closed for invalid runtime constellation levels", () => {
+    // Generic definitions are also reconstructed from persisted/session input
+    // at runtime, so the compile-time `number` field cannot be trusted as a
+    // C0--C6 guarantee by itself.
+    expect(
+      activeConstellations({ ...syntheticUnit, constellationLevel: 7 }),
+    ).toEqual([]);
+    expect(
+      activeConstellations({ ...syntheticUnit, constellationLevel: Number.NaN }),
+    ).toEqual([]);
+    expect(
+      activeConstellations({ ...syntheticUnit, constellationLevel: Number.POSITIVE_INFINITY }),
+    ).toEqual([]);
+  });
+
+  it("ignores malformed constellation rows instead of unlocking them", () => {
+    const malformed = {
+      ...syntheticUnit,
+      constellationLevel: 6,
+      constellations: [
+        ...syntheticUnit.constellations,
+        { level: 0 as 1, id: "invalid-c0", name: "invalid", effects: [] },
+        { level: 7 as 6, id: "invalid-c7", name: "invalid", effects: [] },
+      ],
+    };
+    expect(activeConstellations(malformed).map((c) => c.id)).toEqual([
+      "synthetic-c1",
+      "synthetic-c4",
+    ]);
+  });
+
   it("does not mutate the definition when sorting constellations", () => {
     const before = structuredClone(syntheticUnit.constellations);
     activeConstellations({ ...syntheticUnit, constellationLevel: 6 });

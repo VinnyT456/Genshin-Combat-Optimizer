@@ -3,6 +3,7 @@ import type { GenericCharacterDefinition } from "@/simulation/character/characte
 import type {
   DamageInstanceDefinition,
   KitAbility,
+  ResourceScalingTerm,
 } from "@/simulation/character/kit";
 import type { ScalingTerm } from "@/simulation/character/scaling";
 import { evaluateIcd } from "@/simulation/reactions/icd";
@@ -57,6 +58,8 @@ export interface PlannedHit {
   timestamp: number;
   /** Talent-resolved scaling terms; summed by the damage pipeline. */
   scaling: readonly ScalingTerm[];
+  /** Resource terms are materialised by the engine at the appropriate time. */
+  resourceScaling?: readonly ResourceScalingTerm[];
   element: Element;
   damageType: DamageType;
   /**
@@ -201,6 +204,9 @@ export function planAbility(input: PlanAbilityInput): readonly PlannedHit[] {
       scaling: resolveScaling(instance, talentLevel),
       element: instance.element,
       damageType: instance.damageType,
+      ...(instance.resourceScaling !== undefined
+        ? { resourceScaling: instance.resourceScaling }
+        : {}),
     };
 
     const application = instance.application;

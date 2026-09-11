@@ -1,6 +1,12 @@
 import type { SimulationConfig, Stats } from "@/types";
+import {
+  applyArtifactStatsToResolvedStats,
+  resolveEquippedStats,
+  activeSetBonusKeys,
+  type ArtifactLoadout,
+  type WeaponStats,
+} from "@/simulation/character/equipment";
 import type {
-  ArtifactLoadout,
   ArtifactPiece,
   ArtifactSlot,
 } from "@/simulation/character/equipment";
@@ -12,11 +18,16 @@ import type {
   WeaponRefinement,
 } from "@/simulation/engine/equipmentBuffs";
 import { weaponPassiveBuffsById } from "@/game-data/weapons/weaponBuffs";
+import {
+  findWeaponBaseAtkAtLevel,
+  findWeaponStatsAtLevel,
+} from "@/game-data/weapons/registry";
 import { setBonusBuffsById } from "@/game-data/artifacts/setBonusBuffs";
 import { completeSetBonusBuffsById } from "@/game-data/artifacts/completeSetBonusBuffs";
 import {
   type ArtifactPieceCount,
   type CharacterEquipmentSelection,
+  DEFAULT_WEAPON_LEVEL,
   type EquipmentSelections,
   selectionFor,
 } from "@/features/team-builder/equipmentSelection";
@@ -53,12 +64,12 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * A synthetic loadout standing in for "N pieces of one set".
+ * A synthetic loadout standing in for legacy "N pieces of one set" selections.
  *
  * WHY SYNTHETIC. `harvestArtifactSetBuffs()` gates tiers on `activeSetBonusKeys()`,
- * which counts real `ArtifactPiece`s per slot. The picker, by design, selects a
- * SET and a piece count rather than five individual artifacts, so this function
- * produces the loadout that count describes.
+ * which counts real `ArtifactPiece`s per slot. Older persisted selections only
+ * named one SET and a piece count, so this function produces that fallback;
+ * the current picker stores five explicit pieces and does not use it.
  *
  * The pieces carry NO STATS. That is deliberate and is the honest choice: the
  * generated artifact data publishes set bonuses and nothing else — no main
@@ -111,16 +122,31 @@ export function characterEquipmentBuffs(
       ? undefined
       : weaponPassiveBuffsById(selection.weaponId);
 
-  const setBonus: ArtifactSetBonusBuffs | undefined =
-    selection.artifactSetId === undefined || selection.artifactSetId === null
-      ? undefined
-      : setBonusBuffsById(selection.artifactSetId);
-  const runtimeSetBonus: ArtifactSetBonusBuffs | undefined =
-    selection.artifactSetId === undefined || selection.artifactSetId === null
-      ? undefined
-      : completeSetBonusBuffsById(selection.artifactSetId);
+  // A modern loadout can mix sets per slot. Keep set ids sorted so equal
+  // builds produce the same buff order and fingerprint on every run.
+  const loadout = selection.artifactLoadout ?? (
+    selection.artifactSetId && selection.artifactPieces !== undefined
+      ? syntheticLoadout(selection.artifactSetId, selection.artifactPieces)
+      : undefined
+  );
+  const setIds = new Set<string>();
+  for (const piece of Object.values(loadout ?? {})) {
+    if (piece?.setId) setIds.add(piece.setId);
+  }
+  if (setIds.size === 0 && selection.artifactSetId) {
+    setIds.add(selection.artifactSetId);
+  }
+  const orderedSetIds = [...setIds].sort();
+  const setBonuses = orderedSetIds
+    .map((setId) => setBonusBuffsById(setId))
+    .filter((value): value is ArtifactSetBonusBuffs => value !== undefined);
+  const runtimeSetBonuses = orderedSetIds
+    .map((setId) => completeSetBonusBuffsById(setId))
+    .filter((value): value is ArtifactSetBonusBuffs => value !== undefined);
 
-  if (!passive && !setBonus && !runtimeSetBonus) return undefined;
+  if (!passive && setBonuses.length === 0 && runtimeSetBonuses.length === 0) {
+    return undefined;
+  }
 
   const entry: {
     refinement?: WeaponRefinement;
@@ -139,27 +165,9 @@ export function characterEquipmentBuffs(
     if (selection.refinement !== undefined) entry.refinement = selection.refinement;
   }
 
-  if (setBonus && selection.artifactSetId) {
-    entry.setBonuses = [setBonus];
-    // Only the equipped set's loadout, so the tier gate counts real pieces.
-    // `artifactPieces` is required to claim any tier; without it nothing is
-    // counted and no bonus is applied.
-    if (selection.artifactPieces !== undefined) {
-      entry.artifacts = syntheticLoadout(
-        selection.artifactSetId,
-        selection.artifactPieces,
-      );
-    }
-  }
-  if (runtimeSetBonus) {
-    entry.runtimeSetBonuses = [runtimeSetBonus];
-    if (selection.artifactPieces !== undefined && selection.artifactSetId) {
-      entry.artifacts ??= syntheticLoadout(
-        selection.artifactSetId,
-        selection.artifactPieces,
-      );
-    }
-  }
+  if (setBonuses.length > 0) entry.setBonuses = setBonuses;
+  if (runtimeSetBonuses.length > 0) entry.runtimeSetBonuses = runtimeSetBonuses;
+  if (loadout !== undefined) entry.artifacts = loadout;
 
   return entry;
 }
@@ -174,6 +182,95 @@ export interface EquippedCharacter {
    * would double-count it.
    */
   readonly stats: Stats;
+  /** Intrinsic stats, when the caller can retain them separately. */
+  readonly intrinsicStats?: Stats;
+}
+
+/**
+ * Resolve the authored weapon contribution used by the current picker.
+ *
+ * Older selections omitted weapon level, so level 90 remains the compatibility
+ * default. New selections persist the exact level and missing generated values
+ * fail closed rather than falling back to a different level.
+ */
+export function weaponStatsAtLevel(
+  weaponId: string,
+  level: number,
+): WeaponStats | undefined {
+  const authored = findWeaponStatsAtLevel(weaponId, level);
+  if (!authored) {
+    const baseAtk = findWeaponBaseAtkAtLevel(weaponId, level);
+    return baseAtk === undefined ? undefined : { baseAtk };
+  }
+  return {
+    baseAtk: authored.baseAtk,
+    ...(authored.subStat.type !== "none"
+      ? {
+          substat: {
+            stat: authored.subStat.type === "physicalDmg"
+              ? "dmgBonus"
+              : authored.subStat.type,
+            value: authored.subStat.value,
+          },
+        }
+      : {}),
+  };
+}
+
+function weaponStatsAtAuthoredLevel(
+  weaponId: string,
+  level = DEFAULT_WEAPON_LEVEL,
+): WeaponStats | undefined {
+  return weaponStatsAtLevel(weaponId, level);
+}
+
+/**
+ * Add a persisted weapon to intrinsic stats without folding it twice.
+ *
+ * Interactive selection already stores the result of `resolveEquippedStats`,
+ * which carries `base`; URL/session hydration commonly restores the intrinsic
+ * bag instead. A custom manual stat bag is preserved as authored by the user.
+ */
+function statsForSelection(
+  stats: Stats,
+  intrinsicStats: Stats | undefined,
+  weaponId: string | undefined,
+  weaponLevel: number | undefined,
+  artifactLoadout: ArtifactLoadout | undefined,
+): Stats {
+  if (weaponId === undefined) {
+    if (artifactLoadout === undefined) return stats;
+    return stats.base === undefined
+      ? resolveEquippedStats(stats, { artifacts: artifactLoadout }).stats
+      : applyArtifactStatsToResolvedStats(stats, artifactLoadout);
+  }
+  const weapon = weaponStatsAtAuthoredLevel(weaponId, weaponLevel);
+  if (!weapon) {
+    return artifactLoadout
+      ? applyArtifactStatsToResolvedStats(stats, artifactLoadout)
+      : stats;
+  }
+
+  const source = intrinsicStats ?? stats;
+  if (stats.base !== undefined) {
+    return artifactLoadout
+      ? applyArtifactStatsToResolvedStats(stats, artifactLoadout)
+      : stats;
+  }
+  if (
+    intrinsicStats !== undefined &&
+    (stats.atk !== intrinsicStats.atk ||
+      stats.hp !== intrinsicStats.hp ||
+      stats.def !== intrinsicStats.def)
+  ) {
+    return artifactLoadout
+      ? applyArtifactStatsToResolvedStats(stats, artifactLoadout)
+      : stats;
+  }
+  return resolveEquippedStats(source, {
+    weapon,
+    artifacts: artifactLoadout,
+  }).stats;
 }
 
 /**
@@ -197,8 +294,15 @@ export function equipmentConfig(
   // Party order. A `Record` built by walking the team is stable regardless of
   // how the selections record was keyed.
   for (const character of team) {
-    equippedStats[character.id] = character.stats;
-    const buffs = characterEquipmentBuffs(selectionFor(selections, character.id));
+    const selection = selectionFor(selections, character.id);
+    equippedStats[character.id] = statsForSelection(
+      character.stats,
+      character.intrinsicStats,
+      selection.weaponId,
+      selection.weaponLevel,
+      selection.artifactLoadout,
+    );
+    const buffs = characterEquipmentBuffs(selection);
     if (buffs) equipmentBuffs[character.id] = buffs;
   }
 
@@ -222,24 +326,30 @@ export function selectionIsModelled(
   const entry = characterEquipmentBuffs(selection);
   if (!entry) return false;
   if (entry.weaponPassive) return true;
-  const pieces = selection.artifactPieces;
-  if (pieces === undefined) return false;
-  return (entry.runtimeSetBonuses ?? []).some((bonus) =>
-    pieces === 1
-      ? (bonus.onePiece?.length ?? 0) > 0
-      : pieces >= 4
-      ? (bonus.fourPiece?.length ?? 0) > 0 ||
+  const active = new Set(activeSetBonusKeys(entry.artifacts));
+  for (const piece of Object.values(entry.artifacts ?? {})) {
+    if (piece) active.add(`${piece.setId}:1`);
+  }
+  return (entry.runtimeSetBonuses ?? []).some((bonus) => {
+    if (active.has(`${bonus.setId}:1`) && (bonus.onePiece?.length ?? 0) > 0) {
+      return true;
+    }
+    if (active.has(`${bonus.setId}:2`)) {
+      if (
+        (bonus.twoPiece?.length ?? 0) > 0 ||
+        (bonus.twoPieceHealingEffects?.length ?? 0) > 0 ||
+        (bonus.twoPieceStateEffects?.length ?? 0) > 0 ||
         (bonus.healingEffects?.length ?? 0) > 0 ||
+        (bonus.stateEffects?.length ?? 0) > 0
+      ) return true;
+    }
+    if (active.has(`${bonus.setId}:4`)) {
+      return (
+        (bonus.fourPiece?.length ?? 0) > 0 ||
         (bonus.fourPieceHealingEffects?.length ?? 0) > 0 ||
-        (bonus.twoPieceHealingEffects?.length ?? 0) > 0 ||
-        (bonus.stateEffects?.length ?? 0) > 0 ||
-        (bonus.twoPieceStateEffects?.length ?? 0) > 0 ||
-        (bonus.fourPieceStateEffects?.length ?? 0) > 0 ||
-        (bonus.twoPiece?.length ?? 0) > 0
-      : (bonus.twoPiece?.length ?? 0) > 0 ||
-        (bonus.twoPieceHealingEffects?.length ?? 0) > 0 ||
-        (bonus.stateEffects?.length ?? 0) > 0 ||
-        (bonus.twoPieceStateEffects?.length ?? 0) > 0 ||
-        (bonus.healingEffects?.length ?? 0) > 0,
-  );
+        (bonus.fourPieceStateEffects?.length ?? 0) > 0
+      );
+    }
+    return false;
+  });
 }

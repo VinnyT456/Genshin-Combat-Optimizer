@@ -223,16 +223,13 @@ export const UNSUPPORTED_MECHANICS: readonly UnsupportedMechanic[] = [
       "restates them in prose ('with 1.15 as the Reaction Multiplier as " +
       "opposed to 1.25 like Spread'). Two independent renderings, so the " +
       "coefficients are settled. " +
-      "The REMAINING GAP is unchanged and real: the Quicken AURA is not " +
-      "created, so neither second-stage reaction can trigger from simulation " +
-      "state no matter how correct the coefficients are. Closing it needs " +
-      "the aura duration, which KQM does supply [K3]: " +
-      "Quicken Duration (s) = min(Dendro gauge, Electro gauge) * 5 + 6. " +
-      "That formula is NOT implemented here - it is recorded so the next " +
-      "implementer starts from a sourced value instead of a guess. Note it " +
-      "yields SECONDS directly rather than a gauge that decays, which is a " +
-      "different shape from every other aura this layer models; that " +
-      "mismatch, not the number, is the actual work.",
+      "PARTIAL IMPLEMENTATION: the single-target aura layer now creates a " +
+      "duration-backed Quicken state using the sourced formula " +
+      "Quicken Duration (s) = min(Dendro gauge, Electro gauge) * 5 + 6, " +
+      "and routes later matching hits to Aggravate or Spread. The remaining " +
+      "gap is exact game fidelity for compound-aura refresh/decay edge cases " +
+      "and multi-target propagation; those still need separate sourced tests. " +
+      "The entry stays visible until those cases are verified.",
   },
   {
     id: "crystallize-shield",

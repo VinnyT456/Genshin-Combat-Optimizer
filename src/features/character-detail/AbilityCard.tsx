@@ -26,6 +26,9 @@ export function hitLabel(index: number): string {
 
 interface Props {
   ability: KitAbility;
+  /** Source-backed Chinese talent copy; absent only for non-roster fixtures. */
+  nameZh?: string;
+  descriptionZh?: string;
   /** Chinese slot label, e.g. "元素战技". */
   slotLabel: string;
   /** The level the user chose. This is what gets saved to the build. */
@@ -53,6 +56,8 @@ interface Props {
  */
 export function AbilityCard({
   ability,
+  nameZh,
+  descriptionZh,
   slotLabel,
   level,
   talentBoost = 0,
@@ -80,7 +85,12 @@ export function AbilityCard({
           <span className="text-micro font-semibold uppercase tracking-wide text-amber-400">
             {slotLabel}
           </span>
-          <h4 className="text-sm font-semibold text-slate-100">{slotLabel}</h4>
+          <h4 className="text-sm font-semibold text-slate-100">{nameZh ?? slotLabel}</h4>
+          {descriptionZh && (
+            <p className="mt-1 max-w-3xl whitespace-pre-line text-xs leading-5 text-slate-400">
+              {descriptionZh}
+            </p>
+          )}
         </div>
 
         {/*

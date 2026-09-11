@@ -719,6 +719,8 @@ export type CooldownState = Readonly<Record<string, number>>;
 export interface ActiveStanceState<TStance = unknown> {
   stance: TStance;
   startTime: number;
+  /** Values captured when the stance began, for cast-snapshot scaling. */
+  resourceSnapshots?: Readonly<Record<string, number>>;
 }
 
 /** Mutable per-character state tracked during a simulation. */
@@ -936,6 +938,10 @@ export interface SimulationSnapshot {
   artifactEvents?: readonly ArtifactScheduledEvent[];
   /** Healing history needed to resume Song/Clam conversions without replay. */
   healingHistory?: readonly HealingEvent[];
+  /** Runtime buffs created by declarative state-end effects. */
+  runtimeBuffs?: readonly unknown[];
+  /** Cooldown/usage state for serializable lifecycle triggers. */
+  artifactTriggerState?: Readonly<Record<string, { lastTriggered: number; count: number }>>;
 }
 
 /** Serializable queue state for time-driven reactions. */
@@ -1086,6 +1092,8 @@ export type ArtifactStateEffect =
         /** An externally supplied ResourceEvent (e.g. HP/Bond of Life). */
         | "resourceEvent";
       value: number;
+      /** Optional action-slot gate for hit-triggered resources. */
+      actionTypes?: readonly ActionType[];
       /** Optional damage-type gate for hit-triggered resources. */
       damageTypes?: readonly DamageType[];
       /** Optional element gate for hit-triggered resources. */
@@ -1106,6 +1114,20 @@ export type ArtifactStateEffect =
       sourceCharacterId: string;
       cooldownSeconds: number;
       abilityTypes?: readonly ("skill" | "burst")[];
+    }
+  | {
+      /** Reduces party burst cooldowns when the source lands qualifying hits. */
+      kind: "cooldownReductionOnHit";
+      sourceCharacterId: string;
+      reductionSeconds: number;
+      cooldownSeconds: number;
+      maxTriggers?: number;
+      actionTypes?: readonly ActionType[];
+      damageTypes?: readonly DamageType[];
+      elements?: readonly Element[];
+      /** Optional stance id that must be active on the source. */
+      requiresStanceId?: string;
+      excludeSource?: boolean;
     }
   | {
       /** Reduces selected cooldowns after a qualifying reaction. */

@@ -29,7 +29,10 @@ import {
   pruneSelections,
   serializeSelections,
 } from "@/features/team-builder/equipmentSelection";
-import { findWeapon } from "@/game-data/weapons/registry";
+import {
+  findWeapon,
+  getDefaultWeapon,
+} from "@/game-data/weapons/registry";
 import { findArtifact } from "@/game-data/artifacts/registry";
 import type { AppView } from "@/features/simulation/urlState";
 import { generateRotationInsights } from "@/features/simulation/insightsModel";
@@ -73,7 +76,15 @@ import {
 import { elementBgClass, fmtNum } from "@/lib/format";
 import { MAIN_CONTENT_ID } from "@/components/ui/landmarks";
 import { detectResonances } from "@/features/team-builder/resonance";
-import { toWebsiteCharacter } from "@/features/team-builder/rosterModel";
+import {
+  getCharacterMetadata,
+  toWebsiteCharacter,
+} from "@/features/team-builder/rosterModel";
+import {
+  DEFAULT_REFINEMENT,
+  DEFAULT_WEAPON_LEVEL,
+  equipWeapon,
+} from "@/features/team-builder/equipmentSelection";
 import type {
   CharacterDefinition,
   Element,
@@ -103,6 +114,47 @@ const STALE_RESULT_NOTICE =
 const STALE_RESULT_ANNOUNCEMENT =
   "配置已变更，下方结果对应的是变更前的配置。";
 const SEARCH_BLOCKED_REASON = "请至少配置 1 位出战角色以搜索循环。";
+
+/**
+ * The team cards show a starter weapon for every character. Keep that visible
+ * default in the simulation state too, so the first panel and first run use
+ * the same build instead of displaying a weapon the engine never receives.
+ */
+function defaultEquipmentForTeam(team: Team): EquipmentSelections {
+  let selections = emptyEquipmentSelections();
+  for (const character of team) {
+    if (character === null) continue;
+    const metadata = getCharacterMetadata(character.id);
+    const weapon = getDefaultWeapon(metadata.weaponType);
+    selections = equipWeapon(
+      selections,
+      character.id,
+      weapon.id,
+      DEFAULT_REFINEMENT,
+      DEFAULT_WEAPON_LEVEL,
+    );
+  }
+  return selections;
+}
+
+function mergeDefaultEquipment(
+  team: Team,
+  selections: EquipmentSelections,
+): EquipmentSelections {
+  let next = selections;
+  for (const character of team) {
+    if (character === null || selections[character.id]?.weaponId !== undefined) continue;
+    const metadata = getCharacterMetadata(character.id);
+    next = equipWeapon(
+      next,
+      character.id,
+      getDefaultWeapon(metadata.weaponType).id,
+      DEFAULT_REFINEMENT,
+      DEFAULT_WEAPON_LEVEL,
+    );
+  }
+  return next;
+}
 
 /** Accessible name for the segmented control that scopes the single page. */
 const VIEW_SWITCHER_LABEL = "工作区视图";
@@ -139,6 +191,7 @@ export default function Home() {
       }),
     );
   });
+  const initialTeamRef = useRef(team);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
 
   // Simulation & Setup state
@@ -177,8 +230,8 @@ export default function Home() {
    * bonuses — both fully implemented and tested on the engine side — reached
    * the engine for no build the user could construct.
    */
-  const [equipment, setEquipment] = useState<EquipmentSelections>(
-    emptyEquipmentSelections,
+  const [equipment, setEquipment] = useState<EquipmentSelections>(() =>
+    defaultEquipmentForTeam(team),
   );
   // Team and view live in the URL so a configuration is shareable and
   // bookmarkable, and Back/Forward moves between configurations.
@@ -192,14 +245,21 @@ export default function Home() {
       if (saved !== null) { setTeam(saved.team.map((savedCharacter) => savedCharacter === null ? null : { ...(roster.find((candidate) => candidate.id === savedCharacter.id) ?? {}), ...savedCharacter } as CharacterDefinition)); setEnemy(saved.enemy); setRotation(saved.rotation); setSimConfig(saved.simConfig); setSearchBudget(saved.searchBudget as SearchBudget); setSearchObjective(saved.searchObjective as OptimizationObjective); setSearchDuration(saved.searchDuration); }
       // Restored from its own key rather than the workspace draft: equipment
       // is optional state whose absence must never invalidate a saved team.
+      const parsedEquipment = parseSelections(
+        window.sessionStorage.getItem(EQUIPMENT_STORAGE_KEY),
+        (id) => findWeapon(id) !== undefined,
+        (id) => findArtifact(id) !== undefined,
+      );
       setEquipment(
-        parseSelections(
-          window.sessionStorage.getItem(EQUIPMENT_STORAGE_KEY),
-          (id) => findWeapon(id) !== undefined,
-          (id) => findArtifact(id) !== undefined,
+        mergeDefaultEquipment(
+          saved?.team ?? initialTeamRef.current,
+          parsedEquipment,
         ),
       );
     } finally { setDraftHydrated(true); }
+  // Hydrate once per roster load. Team changes after hydration are handled by
+  // `handleTeamChange` and the URL adoption effect, so this effect must not
+  // re-read storage and overwrite a fresh in-memory edit.
   }, [roster]);
   useEffect(() => {
     if (!draftHydrated) return;
@@ -237,6 +297,22 @@ export default function Home() {
       return sameAsCurrent ? current : next;
     });
   }, [urlState.team, urlHydrated, roster]);
+
+  // URL navigation and quick presets can introduce characters without going
+  // through the picker. Add starter weapons for those members after the team
+  // state settles, while preserving every explicit selection already present.
+  useEffect(() => {
+    if (!draftHydrated || !urlHydrated) return;
+    setEquipment((current) =>
+      mergeDefaultEquipment(
+        team,
+        pruneSelections(
+          current,
+          team.filter((c): c is CharacterDefinition => c !== null).map((c) => c.id),
+        ),
+      ),
+    );
+  }, [draftHydrated, team, urlHydrated]);
 
   const teamMembers = useMemo(() => members(team), [team]);
   const count = memberCount(team);
@@ -321,9 +397,12 @@ export default function Home() {
       // would otherwise persist invisibly and reappear on re-add. Pruned on
       // team change rather than on render, which would fight the picker.
       setEquipment((current) =>
-        pruneSelections(
-          current,
-          nextTeam.filter((c): c is CharacterDefinition => c !== null).map((c) => c.id),
+        mergeDefaultEquipment(
+          nextTeam,
+          pruneSelections(
+            current,
+            nextTeam.filter((c): c is CharacterDefinition => c !== null).map((c) => c.id),
+          ),
         ),
       );
       pushUrlState({
@@ -923,4 +1002,3 @@ function Stat({
     </div>
   );
 }
-

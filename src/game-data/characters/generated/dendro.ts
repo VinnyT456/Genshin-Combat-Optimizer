@@ -2915,7 +2915,7 @@ export const tighnari: GeneratedCharacter = {
     { id: "tighnari-p3", name: "Encyclopedic Knowledge", effects: [] },
   ],
   constellations: [
-    { level: 1, id: "tighnari-c1", name: "Beginnings Determined at the Roots", effects: [] },
+    { level: 1, id: "tighnari-c1", name: "Beginnings Determined at the Roots", effects: [], buffs: [{ id: "tighnari-c1", source: "Beginnings Determined at the Roots", sourceCharacterId: "tighnari", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, conditions: { damageTypes: ["charged"] }, modifiers: [{ stat: "critRate", value: 0.15 }] }] },
     { level: 2, id: "tighnari-c2", name: "Origins Known From the Stem", effects: [] },
     { level: 3, id: "tighnari-c3", name: "Fortunes Read Amongst the Branches", effects: [], buffs: [{ id: "tighnari-c3", source: "Fortunes Read Amongst the Branches", sourceCharacterId: "tighnari", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "burst", levels: 3 }] }] },
     { level: 4, id: "tighnari-c4", name: "Withering Glimpsed in the Leaves", effects: [] },

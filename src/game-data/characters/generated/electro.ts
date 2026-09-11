@@ -2096,7 +2096,7 @@ export const flins: GeneratedCharacter = {
     },
   passives: [
     { id: "flins-a1", name: "Symphony of Winter", unlockAscension: 1, effects: [] },
-    { id: "flins-a4", name: "Whispering Flame", unlockAscension: 4, effects: [] },
+    { id: "flins-a4", name: "Whispering Flame", unlockAscension: 4, effects: [], buffs: [{ id: "flins-a4", source: "Whispering Flame", sourceCharacterId: "flins", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, conversions: [{ sourceStat: "atk", targetStat: "elementalMastery", ratio: 0.08, maxCap: 160 }] }] },
     { id: "flins-p3", name: "Moonsign Benediction: Old World Secrets", effects: [] },
     { id: "flins-p4", name: "A Light in the Dark", effects: [] },
   ],

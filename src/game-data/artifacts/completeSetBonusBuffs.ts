@@ -208,7 +208,7 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
     case "resolution-of-sojourner-4pc":
       return [makeBuff(effectId, source, [{ stat: "critRate", value: 0.3 }], { damageTypes: ["charged"] })];
     case "brave-heart-4pc":
-      return [dmg(effectId, source, 0.3, undefined, { minEnemyHpFraction: 0.5 })];
+      return [dmg(effectId, source, 0.3, undefined, { minEnemyHpFractionExclusive: 0.5 })];
     case "defenders-will-4pc":
       return [resistance(effectId, source, ["pyro", "hydro", "anemo", "electro", "dendro", "cryo", "geo"], 0.3)];
     case "tiny-miracle-2pc":
@@ -229,7 +229,7 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
     case "martial-artist-4pc":
       return [resourceGatedDamage(effectId, source, 0.25, "artifact:martial-artist", ["normal", "charged"] )];
     case "berserker-4pc":
-      return [makeBuff(effectId, source, [{ stat: "critRate", value: 0.24 }], { maxHpFraction: 0.7 })];
+      return [makeBuff(effectId, source, [{ stat: "critRate", value: 0.24 }], { maxHpFractionExclusive: 0.7 })];
     case "instructor-4pc":
       return [makeBuff(effectId, source, [{ stat: "elementalMastery", value: 120 }], { resources: [{ resourceId: "artifact:instructor", comparator: "gte", value: 1, owner: "source" }] }, "party")];
     case "blizzard-strayer-4pc":

@@ -3532,7 +3532,7 @@ export const travelerFAnemo: GeneratedCharacter = {
   ],
   constellations: [
     { level: 1, id: "traveler-f-anemo-c1", name: "Raging Vortex", effects: [] },
-    { level: 2, id: "traveler-f-anemo-c2", name: "Uprising Whirlwind", effects: [] },
+    { level: 2, id: "traveler-f-anemo-c2", name: "Uprising Whirlwind", effects: [], buffs: [{ id: "traveler-f-anemo-c2", source: "Uprising Whirlwind", sourceCharacterId: "traveler-f-anemo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, modifiers: [{ stat: "energyRecharge", value: 0.16 }] }] },
     { level: 3, id: "traveler-f-anemo-c3", name: "Sweeping Gust", effects: [], buffs: [{ id: "traveler-f-anemo-c3", source: "Sweeping Gust", sourceCharacterId: "traveler-f-anemo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "burst", levels: 3 }] }] },
     { level: 4, id: "traveler-f-anemo-c4", name: "Cherishing Breezes", effects: [] },
     { level: 5, id: "traveler-f-anemo-c5", name: "Vortex Stellaris", effects: [], buffs: [{ id: "traveler-f-anemo-c5", source: "Vortex Stellaris", sourceCharacterId: "traveler-f-anemo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "skill", levels: 3 }] }] },
@@ -3822,7 +3822,7 @@ export const travelerMAnemo: GeneratedCharacter = {
   ],
   constellations: [
     { level: 1, id: "traveler-m-anemo-c1", name: "Raging Vortex", effects: [] },
-    { level: 2, id: "traveler-m-anemo-c2", name: "Uprising Whirlwind", effects: [] },
+    { level: 2, id: "traveler-m-anemo-c2", name: "Uprising Whirlwind", effects: [], buffs: [{ id: "traveler-m-anemo-c2", source: "Uprising Whirlwind", sourceCharacterId: "traveler-m-anemo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, modifiers: [{ stat: "energyRecharge", value: 0.16 }] }] },
     { level: 3, id: "traveler-m-anemo-c3", name: "Sweeping Gust", effects: [], buffs: [{ id: "traveler-m-anemo-c3", source: "Sweeping Gust", sourceCharacterId: "traveler-m-anemo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "burst", levels: 3 }] }] },
     { level: 4, id: "traveler-m-anemo-c4", name: "Cherishing Breezes", effects: [] },
     { level: 5, id: "traveler-m-anemo-c5", name: "Vortex Stellaris", effects: [], buffs: [{ id: "traveler-m-anemo-c5", source: "Vortex Stellaris", sourceCharacterId: "traveler-m-anemo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, talentLevelModifiers: [{ slot: "skill", levels: 3 }] }] },

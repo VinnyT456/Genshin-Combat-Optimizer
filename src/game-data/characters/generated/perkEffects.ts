@@ -90,7 +90,7 @@ export interface GeneratedPerkEffect {
   enemyModifiers?: readonly PerkEnemyModifier[];
   /** Damage types the effect is scoped to. Absent means unscoped. */
   damageTypes?: readonly string[];
-  /** A talent-level boost -- structured, but with no home in `Buff`. */
+  /** A talent-level boost, emitted as a `Buff` on the character definition. */
   talentLevelBoost?: { slot: PerkTalentSlot; levels: number };
   /** Why the row is not `modelled`. Absent when it is. */
   reason?: string;

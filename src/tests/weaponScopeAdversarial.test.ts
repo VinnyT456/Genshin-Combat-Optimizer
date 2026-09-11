@@ -44,6 +44,7 @@ import {
 // ============================================================================
 
 const RUST_ID = "rust";
+const MISTSPLITTER_ID = "mistsplitterreforged";
 
 /** ATK 1000, multiplier 1.0, DEF x0.5 -> 500 per normal/charged hit. */
 const NORMAL_BASE = expectedNeutralDamage(1000, 1);
@@ -245,18 +246,26 @@ describe("weapon bucket census", () => {
     expect(rows).toHaveLength(1168);
   });
 
-  it("the 30 expressible rows belong to exactly 6 weapons, 5 refinements each", () => {
+  it("the expressible rows plus safe Homa/Mistsplitter translations are fully addressable", () => {
     // Cross-checks the pin from a DIFFERENT direction: per-weapon, not per-row.
-    expect(weaponPassiveBuffsByWeaponId.size).toBe(6);
+    // Staff of Homa is translated from sourced data whose generated bucket is
+    // unimplemented because the runtime now expresses its HP threshold.
+    // Mistsplitter contributes its unconditional all-element grant; its timed
+    // Emblem stacks remain intentionally unsupported.
+    expect(weaponPassiveBuffsByWeaponId.size).toBe(8);
     for (const passive of weaponPassiveBuffsByWeaponId.values()) {
       expect(Object.keys(passive.buffsByRefinement)).toHaveLength(5);
     }
   });
 
-  it("no non-expressible row ever becomes a buff", () => {
+  it("no non-expressible row becomes a buff unless it has a safe translation", () => {
     for (const weapon of generatedWeaponsById.values()) {
       for (const row of weapon.passive?.refinements ?? []) {
-        if (row.bucket === "expressible") continue;
+        if (
+          row.bucket === "expressible" ||
+          weapon.id === "staffofhoma" ||
+          weapon.id === MISTSPLITTER_ID
+        ) continue;
         expect(
           buffsForRefinement(weapon.id, weapon.passive?.name ?? "", row),
         ).toEqual([]);
@@ -264,13 +273,13 @@ describe("weapon bucket census", () => {
     }
   });
 
-  it("every emitted buff is permanent, active-scoped and starts at t=0", () => {
+  it("every emitted buff is permanent, wearer-scoped and starts at t=0", () => {
     for (const passive of weaponPassiveBuffsByWeaponId.values()) {
       for (const buffs of Object.values(passive.buffsByRefinement)) {
         for (const buff of buffs as readonly Buff[]) {
           expect(buff.startTime).toBe(0);
           expect(buff.duration).toBe(Number.POSITIVE_INFINITY);
-          expect(buff.targets).toEqual({ scope: "active" });
+          expect(buff.targets).toEqual({ scope: "self" });
         }
       }
     }

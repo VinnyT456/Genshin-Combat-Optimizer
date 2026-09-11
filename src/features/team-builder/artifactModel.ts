@@ -1,19 +1,11 @@
 import type { ArtifactSetDefinition } from "@/game-data/artifacts/types";
 
 // ---------------------------------------------------------------------------
-// Artifact browsing model — filtering and a STATED order.
+// Artifact browsing model — filtering and chronological ordering.
 //
-// THE DEFECT THIS FIXES: the picker's header read
-// `按游戏上线版本顺序排列` ("ordered by the game version that released them"),
-// but neither source publishes a release version. `version` / `versionWeight`
-// are declared optional on the type and emitted by NOTHING, so the list was
-// simply in generated set-id order and the header was a false statement about
-// the user's own screen.
-//
-// The label was fixed by fixing the SORT: the list is now ordered by rarity and
-// then by Chinese name, and the header says exactly that. A version sort could
-// not be honest without version data, and inventing one from set id would be
-// the same false claim with extra steps.
+// The generated catalog carries the game's numeric set id. These ids are
+// allocated in release order, so descending set id gives a stable newest-to-
+// oldest chronology without maintaining a hand-written version table.
 //
 // Pure: no React, no DOM.
 // ---------------------------------------------------------------------------
@@ -26,18 +18,22 @@ export interface ArtifactFilterState {
 }
 
 /**
- * Rarity descending, then Chinese name — the order the header states.
+ * Chronological newest-to-oldest order, then deterministic fallbacks.
  *
- * `localeCompare` with `zh-CN` sorts by pinyin, which is the order a Chinese
- * reader expects from a name list. The comparator is total: two sets with the
- * same rarity and name would fall back to id, so the order never depends on the
- * input array's incoming order.
+ * A missing catalog id is sorted after sourced rows. `localeCompare` with
+ * `zh-CN` sorts fallback names by pinyin, and id breaks the final tie.
  */
 export function sortArtifacts(
   sets: readonly ArtifactSetDefinition[],
 ): readonly ArtifactSetDefinition[] {
   return [...sets].sort((a, b) => {
-    if (a.rarity !== b.rarity) return b.rarity - a.rarity;
+    const aOrder = a.setId;
+    const bOrder = b.setId;
+    if (aOrder !== undefined && bOrder !== undefined && aOrder !== bOrder) {
+      return bOrder - aOrder;
+    }
+    if (aOrder === undefined && bOrder !== undefined) return 1;
+    if (aOrder !== undefined && bOrder === undefined) return -1;
     const byName = a.nameZh.localeCompare(b.nameZh, "zh-CN");
     if (byName !== 0) return byName;
     return a.id.localeCompare(b.id);

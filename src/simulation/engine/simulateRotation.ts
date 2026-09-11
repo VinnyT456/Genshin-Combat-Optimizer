@@ -16,6 +16,7 @@ import type {
   Stats,
   ArtifactStateEffect,
   DamageType,
+  ActionType,
   ArtifactScheduledEvent,
   HealingEvent,
   PickupEvent,
@@ -48,8 +49,18 @@ import {
 import type { GenericCharacterDefinition } from "@/simulation/character/character";
 import { liftAbility, liftCharacter } from "@/simulation/character/adapter";
 import { cooldownFor, planAbility } from "@/simulation/character/execution";
-import type { KitAbility, NormalAttackString } from "@/simulation/character/kit";
-import { applyStateEffects, createResourceStates, resourceValueAt } from "@/simulation/character/runtime";
+import type { PlannedHit } from "@/simulation/character/execution";
+import type {
+  KitAbility,
+  NormalAttackString,
+  ResourceScalingTerm,
+} from "@/simulation/character/kit";
+import {
+  applyStateEffect,
+  applyStateEffects,
+  createResourceStates,
+  resourceValueAt,
+} from "@/simulation/character/runtime";
 import {
   resolveReactions,
   snapshotEnemyAuras,
@@ -70,6 +81,9 @@ import { restoreFromSnapshot } from "@/simulation/engine/resume";
 import { resolveTalentLevelBoosts } from "@/simulation/engine/talentLevelSeam";
 import { withPerkBuffs } from "@/simulation/engine/perkBuffs";
 import { withEquipmentBuffs } from "@/simulation/engine/equipmentBuffs";
+import { harvestTeamResonanceBuffs } from "@/simulation/engine/teamResonance";
+import { withHarvestedBuffs } from "@/simulation/engine/composeResolvers";
+import type { Buff } from "@/simulation/buffs/types";
 import type { TransformativeInstance } from "@/simulation/reactions/resolver";
 import { resolveInfusedElement } from "@/simulation/reactions/infusions";
 import type { InfusionDefinition } from "@/simulation/reactions/infusions";
@@ -112,11 +126,64 @@ export function getTypedStance(
   return state.activeStance as TypedActiveStance | undefined;
 }
 
+/**
+ * Resolve declarative resource terms into ordinary scaling terms at the point
+ * the hit is authored to read them. A cast snapshot is retained on the active
+ * stance so a resource consumed by the burst still powers every Musou Isshin
+ * hit for the full stance window.
+ */
+function materializeResourceScaling(
+  hit: PlannedHit,
+  state: CharacterState,
+  castTime: number,
+  castResourceSnapshots?: Readonly<Record<string, number>>,
+): PlannedHit {
+  const terms = hit.resourceScaling;
+  if (terms === undefined || terms.length === 0) return hit;
+
+  const stance = getTypedStance(state);
+  const additions = terms.flatMap((term: ResourceScalingTerm) => {
+    const snapshotValue =
+      term.snapshot === "cast"
+        ? stance?.resourceSnapshots?.[term.resourceId] ?? castResourceSnapshots?.[term.resourceId]
+        : undefined;
+    const resource = state.resources?.[term.resourceId];
+    const value =
+      snapshotValue ??
+      resourceValueAt(resource, term.snapshot === "cast" ? castTime : hit.timestamp);
+    if (!Number.isFinite(value) || !Number.isFinite(term.multiplierPerStack) || value === 0) {
+      return [];
+    }
+    return [{ stat: term.stat, multiplier: term.multiplierPerStack * value }];
+  });
+
+  return {
+    ...hit,
+    scaling: additions.length > 0 ? [...hit.scaling, ...additions] : hit.scaling,
+    resourceScaling: undefined,
+  };
+}
+
+function captureResourceSnapshots(
+  state: CharacterState,
+  time: number,
+): Readonly<Record<string, number>> {
+  const values: Record<string, number> = {};
+  for (const [id, resource] of Object.entries(state.resources ?? {})) {
+    values[id] = resourceValueAt(resource, time);
+  }
+  return values;
+}
+
 export interface ActiveTriggerEntry {
   trigger: TriggeredEffectDefinition<KitAbility>;
   startTime: number;
   lastProcTime?: number;
   procCount: number;
+  /** Next scheduled time for a time-driven trigger. */
+  nextProcTime?: number;
+  /** Creating-cast snapshot for effects with snapshotMode=cast. */
+  snapshot?: SimulationSnapshot;
 }
 
 function initCharacterState(
@@ -219,6 +286,9 @@ function snapshotCharacter(state: CharacterState): CharacterSnapshot {
       ? {
           stance: state.activeStance.stance,
           startTime: state.activeStance.startTime,
+          ...(state.activeStance.resourceSnapshots !== undefined
+            ? { resourceSnapshots: { ...state.activeStance.resourceSnapshots } }
+            : {}),
         }
       : undefined,
   };
@@ -234,6 +304,8 @@ function snapshot(
   enemyAuras?: EnemyAuraStore,
   artifactEvents?: readonly ArtifactScheduledEvent[],
   healingHistory?: readonly HealingEvent[],
+  runtimeBuffs?: readonly Buff[],
+  artifactTriggerState?: Readonly<Record<string, { lastTriggered: number; count: number }>>,
 ): SimulationSnapshot {
   const characters: Record<string, CharacterSnapshot> = {};
   for (const [id, state] of states) characters[id] = snapshotCharacter(state);
@@ -261,6 +333,12 @@ function snapshot(
     ...(healingHistory !== undefined && healingHistory.length > 0
       ? { healingHistory: healingHistory.map((event) => ({ ...event })) }
       : {}),
+    ...(runtimeBuffs !== undefined && runtimeBuffs.length > 0
+      ? { runtimeBuffs: runtimeBuffs.map((buff) => ({ ...buff })) }
+      : {}),
+    ...(artifactTriggerState !== undefined && Object.keys(artifactTriggerState).length > 0
+      ? { artifactTriggerState: Object.fromEntries(Object.entries(artifactTriggerState).map(([key, value]) => [key, { ...value }])) }
+      : {}),
   };
 }
 
@@ -280,6 +358,41 @@ function snapshot(
 export function statsWithBase(definitionStats: Stats): Stats {
   if (definitionStats.base !== undefined) return definitionStats;
   return withBaseStats(definitionStats, impliedBaseStats(definitionStats));
+}
+
+/**
+ * Resolve a buff that references its producer's Base ATK into an ordinary
+ * flat-ATK modifier. Bennett's Burst is the first consumer: its field grants
+ * a percentage of Bennett's Base ATK to every target, so treating it as a
+ * recipient ATK% would scale from the wrong character.
+ */
+function materializeRuntimeBuff(
+  buff: Buff,
+  sourceState: CharacterState,
+  config: SimulationConfig,
+  startTime: number,
+): Buff {
+  const sourcePercent = buff.sourceBaseAtkPercent;
+  if (sourcePercent === undefined || !Number.isFinite(sourcePercent)) {
+    return { ...buff, startTime };
+  }
+  const sourceStats = characterStatsFor(
+    sourceState.definition.id,
+    sourceState.definition.baseStats,
+    config,
+  );
+  const sourceBaseAtk = sourceStats.base?.atk ?? impliedBaseStats(sourceState.definition.baseStats).atk;
+  const value = sourceBaseAtk * sourcePercent;
+  const { sourceBaseAtkPercent: _omitted, ...withoutSourcePercent } = buff;
+  void _omitted;
+  return {
+    ...withoutSourcePercent,
+    startTime,
+    modifiers: [
+      ...(buff.modifiers ?? []),
+      ...(Number.isFinite(value) ? [{ stat: "atkFlat" as const, value }] : []),
+    ],
+  };
 }
 
 /**
@@ -399,8 +512,10 @@ function evaluateTriggers(
   timeline: CombatEvent[],
   enemyAuras: EnemyAuraStore,
   tickQueue: ReactionTickQueue,
+  runtimeBuffs: Buff[],
   activeCharacterId?: string,
-): void {
+): number {
+  let totalDamage = 0;
   for (const entry of activeTriggers) {
     if (entry.trigger.trigger !== triggerType) continue;
     if (
@@ -423,8 +538,19 @@ function evaluateTriggers(
       continue;
     }
 
+    if (
+      triggerType === "onInterval" &&
+      (entry.nextProcTime === undefined ||
+        currentTime < entry.nextProcTime - 1e-9)
+    ) {
+      continue;
+    }
+
     entry.lastProcTime = currentTime;
     entry.procCount++;
+    if (triggerType === "onInterval" && entry.trigger.intervalSeconds !== undefined) {
+      entry.nextProcTime = currentTime + entry.trigger.intervalSeconds;
+    }
 
     const procAbility = entry.trigger.ability;
     if (!procAbility) continue;
@@ -442,7 +568,8 @@ function evaluateTriggers(
       icd: sourceState.icd,
     });
 
-    for (const hit of procHits) {
+    for (const plannedHit of procHits) {
+      const hit = materializeResourceScaling(plannedHit, sourceState, currentTime);
       const effectiveElement = resolveInfusedElement(
         hit.element,
         hit.damageType,
@@ -467,7 +594,7 @@ function evaluateTriggers(
           energyGenerated: 0,
         },
         activeCharacterId,
-        snapshot: castSnapshot,
+        snapshot: entry.snapshot ?? castSnapshot,
         enemy,
       };
 
@@ -547,6 +674,11 @@ function evaluateTriggers(
         sourceDef.name,
         hit.abilityId,
       );
+      totalDamage += damage.finalDamage;
+      totalDamage += reaction.transformative.reduce(
+        (sum, instance) => sum + Math.max(0, Number.isFinite(instance.damage) ? instance.damage : 0),
+        0,
+      );
 
       scheduleReactionTicks(
         tickQueue,
@@ -561,7 +693,13 @@ function evaluateTriggers(
         enemyModifiers,
       );
     }
+    for (const buff of entry.trigger.buffs ?? []) {
+      runtimeBuffs.push(
+        materializeRuntimeBuff(buff, sourceState, config, currentTime),
+      );
+    }
   }
+  return totalDamage;
 }
 
 /**
@@ -618,14 +756,16 @@ function drainReactionTicks(
   enemy: EnemyState,
   untilTime: number,
   timeline: CombatEvent[],
-): void {
+): number {
   const fired: FiredReactionTick[] = advanceReactionTicks({
     queue,
     store,
     enemy,
     untilTime,
   });
+  let totalDamage = 0;
   for (const tick of fired) {
+    totalDamage += Math.max(0, Number.isFinite(tick.damage) ? tick.damage : 0);
     timeline.push({
       timestamp: tick.time,
       type: "damage",
@@ -648,6 +788,7 @@ function drainReactionTicks(
       },
     });
   }
+  return totalDamage;
 }
 
 /**
@@ -668,8 +809,11 @@ function emitTransformative(
   characterId: string,
   characterName: string,
   abilityId: string,
-): void {
+): number {
+  let totalDamage = 0;
   for (const instance of instances) {
+    const damage = Math.max(0, Number.isFinite(instance.damage) ? instance.damage : 0);
+    totalDamage += damage;
     timeline.push({
       timestamp,
       type: "damage",
@@ -682,13 +826,14 @@ function emitTransformative(
         abilityName: instance.kind,
         element: instance.resElement,
         damageType: "reaction",
-        rawDamage: instance.damage,
-        finalDamage: instance.damage,
-        nonCritDamage: instance.damage,
-        critDamage: instance.damage,
+        rawDamage: damage,
+        finalDamage: damage,
+        nonCritDamage: damage,
+        critDamage: damage,
       },
     });
   }
+  return totalDamage;
 }
 
 /**
@@ -723,10 +868,14 @@ export function simulateRotation(
   // R1-by-default) and a set's buffs are gated on its actual PIECE COUNT, so a
   // 4pc bonus is absent at 3 pieces. Composed, not chained-over: perk buffs,
   // equipment buffs and any caller-supplied resolver all coexist.
-  const config: SimulationConfig = withEquipmentBuffs(
-    team.map((def) => def.id),
-    withPerkBuffs(team, inputConfig),
+  const config: SimulationConfig = withHarvestedBuffs(
+    withEquipmentBuffs(
+      team.map((def) => def.id),
+      withPerkBuffs(team, inputConfig),
+    ),
+    harvestTeamResonanceBuffs(team),
   );
+  const runtimeBuffs: Buff[] = [];
 
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -737,6 +886,10 @@ export function simulateRotation(
   // effects (for example Brave Heart's >50% bonus) turn off at the correct
   // hit instead of reading a stale initial value forever.
   let trackedEnemyHp = enemy.currentHp ?? enemy.maxHp;
+  const applyEnemyDamage = (amount: number): void => {
+    if (trackedEnemyHp === undefined || !Number.isFinite(amount)) return;
+    trackedEnemyHp = Math.max(0, trackedEnemyHp - Math.max(0, amount));
+  };
   const enemyAtHit = (): EnemyState =>
     trackedEnemyHp === undefined
       ? enemy
@@ -883,6 +1036,9 @@ export function simulateRotation(
         activeTriggers.push(entry as ActiveTriggerEntry);
       }
     }
+    for (const buff of resumed.runtimeBuffs) {
+      if (buff && typeof buff === "object") runtimeBuffs.push(buff as Buff);
+    }
     scheduledArtifactEvents.push(...resumed.artifactEvents);
     resumedFromTime = resumed.clock;
     for (const unknownId of resumed.unknownCharacterIds) {
@@ -927,7 +1083,90 @@ export function simulateRotation(
   const resourceEvents: readonly ResourceEvent[] = [...(config.resourceEvents ?? [])]
     .filter((event) => Number.isFinite(event.timestamp))
     .sort((a, b) => a.timestamp - b.timestamp);
+  const runtimeConfig = (): SimulationConfig =>
+    runtimeBuffs.length > 0 ? withHarvestedBuffs(config, runtimeBuffs) : config;
+
+  /** Resolve time-driven field procs that elapsed before the next action. */
+  function processIntervalTriggers(until: number): void {
+    for (const entry of activeTriggers) {
+      if (entry.trigger.trigger !== "onInterval") continue;
+      const interval = entry.trigger.intervalSeconds;
+      if (interval === undefined || !Number.isFinite(interval) || interval <= 0) continue;
+      if (entry.nextProcTime === undefined) entry.nextProcTime = entry.startTime + interval;
+      let nextProcTime = entry.nextProcTime;
+      while (nextProcTime <= until + 1e-9) {
+        const procTime: number = nextProcTime;
+        const before = entry.procCount;
+        applyEnemyDamage(evaluateTriggers(
+          "onInterval",
+          procTime,
+          activeTriggers,
+          states,
+          activeInfusions,
+          entry.snapshot ?? snapshot(
+            states,
+            procTime,
+            activeCharacterId,
+            activeTriggers,
+            activeInfusions,
+            tickQueue,
+            enemyAuras,
+          ),
+          enemy,
+          config,
+          timeline,
+          enemyAuras,
+          tickQueue,
+          runtimeBuffs,
+          activeCharacterId,
+        ));
+        // Expired or capped entries are removed below; make sure malformed
+        // declarations cannot trap this loop at one timestamp.
+        if (entry.procCount === before) nextProcTime = procTime + interval;
+        else nextProcTime = entry.nextProcTime ?? procTime + interval;
+        if (nextProcTime <= procTime) nextProcTime = procTime + interval;
+      }
+      entry.nextProcTime = nextProcTime;
+    }
+  }
+  const endStance = (state: CharacterState, timestamp: number): void => {
+    const stance = getTypedStance(state);
+    if (!stance) return;
+    for (const buff of stance.stance.stateEndBuffs ?? []) {
+      runtimeBuffs.push({ ...buff, startTime: timestamp });
+    }
+    if (stance.stance.infusion !== undefined) {
+      for (let index = activeInfusions.length - 1; index >= 0; index--) {
+        const entry = activeInfusions[index]!;
+        if (entry.infusion.id === stance.stance.infusion.id) {
+          activeInfusions.splice(index, 1);
+        }
+      }
+    }
+    for (let index = activeTriggers.length - 1; index >= 0; index--) {
+      const entry = activeTriggers[index]!;
+      if (
+        entry.trigger.sourceCharacterId === state.definition.id &&
+        entry.startTime === stance.startTime
+      ) {
+        activeTriggers.splice(index, 1);
+      }
+    }
+    state.activeStance = undefined;
+  };
   const lastArtifactTrigger = new Map<string, number>();
+  const artifactTriggerCounts = new Map<string, number>();
+  for (const [key, value] of Object.entries(config.resumeFrom?.artifactTriggerState ?? {})) {
+    lastArtifactTrigger.set(key, value.lastTriggered);
+    artifactTriggerCounts.set(key, value.count);
+  }
+  const artifactTriggerState = (): Readonly<Record<string, { lastTriggered: number; count: number }>> => {
+    const out: Record<string, { lastTriggered: number; count: number }> = {};
+    for (const [key, lastTriggered] of lastArtifactTrigger) {
+      out[key] = { lastTriggered, count: artifactTriggerCounts.get(key) ?? 0 };
+    }
+    return out;
+  };
   let pickupIndex = 0;
   let resourceIndex = 0;
 
@@ -938,10 +1177,15 @@ export function simulateRotation(
     damageType?: DamageType,
     element?: CharacterDefinition["element"],
     eventResourceId?: string,
+    actionType?: ActionType,
   ): void {
     for (const effect of artifactStateEffects) {
       if (effect.kind !== "resourceOnTrigger" || effect.trigger !== trigger ||
           effect.sourceCharacterId !== sourceCharacterId) continue;
+      if (
+        effect.actionTypes !== undefined &&
+        (actionType === undefined || !effect.actionTypes.includes(actionType))
+      ) continue;
       if (
         effect.damageTypes !== undefined &&
         (damageType === undefined || !effect.damageTypes.includes(damageType))
@@ -1042,6 +1286,45 @@ export function simulateRotation(
         state.cooldowns[abilityId] = Math.max(timestamp, readyAt - Math.max(0, effect.reductionSeconds));
       }
       lastArtifactTrigger.set(key, timestamp);
+    }
+  }
+
+  function triggerCooldownReductionOnHit(
+    sourceCharacterId: string,
+    timestamp: number,
+    damageType: DamageType,
+    element: CharacterDefinition["element"],
+    actionType: ActionType,
+  ): void {
+    const source = states.get(sourceCharacterId);
+    for (const effect of artifactStateEffects) {
+      if (effect.kind !== "cooldownReductionOnHit" || effect.sourceCharacterId !== sourceCharacterId) continue;
+      if (effect.damageTypes !== undefined && !effect.damageTypes.includes(damageType)) continue;
+      if (effect.actionTypes !== undefined && !effect.actionTypes.includes(actionType)) continue;
+      if (effect.elements !== undefined && !effect.elements.includes(element)) continue;
+      if (effect.requiresStanceId !== undefined) {
+        const activeStance = source === undefined ? undefined : getTypedStance(source);
+        if (
+          activeStance === undefined ||
+          activeStance.stance.id !== effect.requiresStanceId ||
+          timestamp >= activeStance.startTime + activeStance.stance.durationSeconds
+        ) continue;
+      }
+      const key = `${effect.kind}:${effect.sourceCharacterId}`;
+      const last = lastArtifactTrigger.get(key) ?? -Infinity;
+      if (timestamp - last < Math.max(0, effect.cooldownSeconds)) continue;
+      const count = artifactTriggerCounts.get(key) ?? 0;
+      if (effect.maxTriggers !== undefined && count >= Math.max(0, effect.maxTriggers)) continue;
+      for (const recipient of party) {
+        if (effect.excludeSource && recipient.definition.id === sourceCharacterId) continue;
+        const burstId = recipient.definition.elementalBurst.id;
+        const readyAt = recipient.cooldowns[burstId];
+        if (readyAt !== undefined) {
+          recipient.cooldowns[burstId] = Math.max(timestamp, readyAt - Math.max(0, effect.reductionSeconds));
+        }
+      }
+      lastArtifactTrigger.set(key, timestamp);
+      artifactTriggerCounts.set(key, count + 1);
     }
   }
 
@@ -1238,6 +1521,94 @@ export function simulateRotation(
     }
   }
 
+  /**
+   * Apply declarative resource gains that respond to a party burst cast.
+   *
+   * Raiden's Resolve is the first consumer: base gain is sourced from the
+   * triggering burst's energy cost, while C1 supplies source-element
+   * multipliers in the resource definition. The engine owns event ordering and
+   * clamping; character-specific numbers stay in data.
+   */
+  function triggerBurstResourceGains(
+    source: CharacterState,
+    ability: KitAbility,
+    timestamp: number,
+  ): void {
+    if (ability.slot !== "burst" || ability.energyCost <= 0) return;
+
+    for (const recipient of party) {
+      const generic = recipient.genericDefinition as GenericCharacterDefinition;
+      for (const definition of generic.resources) {
+        const rule = definition.gainOnBurstCast;
+        if (rule === undefined) continue;
+        if (rule.excludeSource && recipient.definition.id === source.definition.id) continue;
+        const multiplier =
+          rule.multipliersByElement?.[source.definition.element] ??
+          rule.defaultMultiplier ??
+          1;
+        const amount = ability.energyCost * rule.perEnergyCost * multiplier;
+        if (!(amount > 0) || !Number.isFinite(amount)) continue;
+        const current = recipient.resources?.[definition.id];
+        if (current === undefined) continue;
+        const next = applyStateEffect(
+          current,
+          { resourceId: definition.id, kind: "gain", amount },
+          timestamp,
+        );
+        recipient.resources = {
+          ...(recipient.resources ?? {}),
+          [definition.id]: next,
+        };
+        timeline.push(
+          resourceEventRecord({
+            timestamp,
+            sourceCharacterId: source.definition.id,
+            targetCharacterId: recipient.definition.id,
+            resourceId: definition.id,
+            kind: "gain",
+            amount,
+            value: next.value,
+          }),
+        );
+      }
+    }
+  }
+
+  /** Consume resources owned by a character when that character casts burst. */
+  function consumeBurstResources(
+    source: CharacterState,
+    ability: KitAbility,
+    timestamp: number,
+  ): void {
+    if (ability.slot !== "burst") return;
+    const generic = source.genericDefinition as GenericCharacterDefinition;
+    for (const definition of generic.resources) {
+      if (!definition.consumeOnBurstCast) continue;
+      const current = source.resources?.[definition.id];
+      const value = resourceValueAt(current, timestamp);
+      if (current === undefined || value <= 0) continue;
+      const next = applyStateEffect(
+        current,
+        { resourceId: definition.id, kind: "set", amount: 0 },
+        timestamp,
+      );
+      source.resources = {
+        ...(source.resources ?? {}),
+        [definition.id]: next,
+      };
+      timeline.push(
+        resourceEventRecord({
+          timestamp,
+          sourceCharacterId: source.definition.id,
+          resourceId: definition.id,
+          kind: "consume",
+          amount: value,
+          value: next.value,
+        }),
+      );
+    }
+  }
+
   function triggerParticleArtifactEffects(sourceCharacterId: string, timestamp: number): void {
     for (const effect of artifactStateEffects) {
       if (effect.kind !== "energyOnParticlePickup" || effect.sourceCharacterId !== sourceCharacterId) continue;
@@ -1284,13 +1655,14 @@ export function simulateRotation(
     const action = rotation[i]!;
 
     processArtifactEvents(clock);
+    processIntervalTriggers(clock);
 
     // CONTRACT 1: every tick due at or before `clock` resolves BEFORE anything
     // this action does, so a tick and a hit at the same instant are ordered
     // deterministically (tick first, because it was caused earlier). Draining
     // here rather than after the action is also what makes the aura state this
     // action reads the state actually valid at `clock`.
-    drainReactionTicks(tickQueue, enemyAuras, enemy, clock, timeline);
+    applyEnemyDamage(drainReactionTicks(tickQueue, enemyAuras, enemy, clock, timeline));
 
     const verdict = validateAction({
       action,
@@ -1349,7 +1721,7 @@ export function simulateRotation(
           const endsOnSwap = prevStance.stance.endsOnSwap ?? true;
           if (endsOnSwap) {
             const endedStance = prevStance.stance;
-            prevCharState!.activeStance = undefined;
+            endStance(prevCharState!, clock);
             if (endedStance.infusion) {
               const infIdx = activeInfusions.findIndex(
                 (e) => e.infusion.id === endedStance.infusion!.id,
@@ -1376,12 +1748,13 @@ export function simulateRotation(
         currentStance.startTime +
           currentStance.stance.durationSeconds
     ) {
-      state.activeStance = undefined;
+      endStance(state, clock);
     }
 
     const genericDef = state.genericDefinition as GenericCharacterDefinition;
     const resolved = abilityForAction(genericDef, action, state, clock)!;
     const ability: KitAbility = "instances" in resolved ? resolved : liftAbility(resolved);
+    const castResourceSnapshots = captureResourceSnapshots(state, clock);
 
     if (action.actionType === "burst") {
       triggerBurstArtifactEffects(def.id, clock);
@@ -1408,11 +1781,20 @@ export function simulateRotation(
       );
     }
 
+    // Resolve-like resources gain from the burst event itself. This runs
+    // after the cast's own declarative effects and before stance activation,
+    // so a burst cannot spend resources it just generated while still making
+    // the event visible in the same-timestamp timeline.
+    if (action.actionType === "burst") {
+      triggerBurstResourceGains(state, ability, clock);
+    }
+
     // Activate stance if declared on ability
     if (ability.stance) {
       state.activeStance = {
         stance: ability.stance,
         startTime: clock,
+        resourceSnapshots: castResourceSnapshots,
       };
       if (ability.stance.infusion) {
         activeInfusions.push({
@@ -1426,6 +1808,9 @@ export function simulateRotation(
             trigger: trig,
             startTime: clock,
             procCount: 0,
+            ...(trig.trigger === "onInterval" && trig.intervalSeconds !== undefined
+              ? { nextProcTime: clock + trig.intervalSeconds }
+              : {}),
           });
         }
       }
@@ -1436,16 +1821,6 @@ export function simulateRotation(
         startTime: clock,
       });
     }
-    if (ability.triggers) {
-      for (const trig of ability.triggers) {
-        activeTriggers.push({
-          trigger: trig,
-          startTime: clock,
-          procCount: 0,
-        });
-      }
-    }
-
     // Both mechanics seams share one context, built once per cast.
     const castSnapshot = snapshot(
       states,
@@ -1457,7 +1832,23 @@ export function simulateRotation(
       enemyAuras,
       undefined,
       normalizedHealingEvents,
+      runtimeBuffs,
+      artifactTriggerState(),
     );
+
+    // Stance triggers are registered before this snapshot exists. Bind only
+    // cast-snapshot triggers created by this cast, leaving dynamic triggers
+    // to resolve against the proc-time state.
+    for (const entry of activeTriggers) {
+      if (
+        entry.snapshot === undefined &&
+        entry.startTime === clock &&
+        entry.trigger.sourceCharacterId === def.id &&
+        entry.trigger.snapshotMode === "cast"
+      ) {
+        entry.snapshot = castSnapshot;
+      }
+    }
 
     // Evaluate action-based triggers (e.g. onNormalAttack)
     let actionTrigger: TriggerType | undefined;
@@ -1467,7 +1858,7 @@ export function simulateRotation(
     else if (action.actionType === "burst") actionTrigger = "onBurstCast";
 
     if (actionTrigger) {
-      evaluateTriggers(
+      applyEnemyDamage(evaluateTriggers(
         actionTrigger,
         clock,
         activeTriggers,
@@ -1479,8 +1870,9 @@ export function simulateRotation(
         timeline,
         enemyAuras,
         tickQueue,
+        runtimeBuffs,
         activeCharacterId,
-      );
+      ));
     }
 
     // Talent-LEVEL boosts ("Increases the Level of Elemental Skill by 3").
@@ -1525,11 +1917,18 @@ export function simulateRotation(
       icd: state.icd,
       talentLevelBoosts,
     });
+    const materializedHits = hits.map((hit) =>
+      materializeResourceScaling(hit, state, clock, castResourceSnapshots),
+    );
+
+    if (action.actionType === "burst") {
+      consumeBurstResources(state, ability, clock);
+    }
 
     const appliedCastTime = ability.castTime;
 
-    for (let hitIndex = 0; hitIndex < hits.length; hitIndex++) {
-      const hit = hits[hitIndex]!;
+    for (let hitIndex = 0; hitIndex < materializedHits.length; hitIndex++) {
+      const hit = materializedHits[hitIndex]!;
       const hitEnemy = enemyAtHit();
       const effectiveElement = resolveInfusedElement(
         hit.element,
@@ -1539,8 +1938,14 @@ export function simulateRotation(
       );
 
       const effectiveStance = getTypedStance(state);
+      const stanceActiveAtHit =
+        effectiveStance !== undefined &&
+        hit.timestamp <
+          effectiveStance.startTime + effectiveStance.stance.durationSeconds;
       const effectiveDamageType =
-        effectiveStance?.stance.damageTypeOverride ?? hit.damageType;
+        stanceActiveAtHit
+          ? effectiveStance.stance.damageTypeOverride ?? hit.damageType
+          : hit.damageType;
 
       // Aura-gated artifact effects (Blizzard Strayer, Lavawalker,
       // Thundersoother, etc.) must read the aura as it exists for THIS hit.
@@ -1574,19 +1979,14 @@ export function simulateRotation(
       let stats = resolveStats(
         characterStatsFor(def.id, def.baseStats, config),
         hitBuffContext,
-        config.buffResolver,
+        runtimeConfig().buffResolver,
       );
       const enemyModifiers = resolveEnemyModifiers(
         hitBuffContext,
-        config.enemyModifierResolver,
+        runtimeConfig().enemyModifierResolver,
       );
 
-      if (
-        effectiveStance &&
-        hit.timestamp <
-          effectiveStance.startTime +
-            effectiveStance.stance.durationSeconds
-      ) {
+      if (stanceActiveAtHit && effectiveStance !== undefined) {
         stats = applyStanceStats(
           stats,
           effectiveStance.stance,
@@ -1649,14 +2049,14 @@ export function simulateRotation(
         trackedEnemyHp = Math.max(0, trackedEnemyHp - damage.finalDamage);
       }
 
-      emitTransformative(
+      applyEnemyDamage(emitTransformative(
         timeline,
         reaction.transformative,
         hit.timestamp,
         def.id,
         def.name,
         hit.abilityId,
-      );
+      ));
 
       scheduleReactionTicks(
         tickQueue,
@@ -1671,7 +2071,7 @@ export function simulateRotation(
         enemyModifiers,
       );
 
-      evaluateTriggers(
+      applyEnemyDamage(evaluateTriggers(
         "onDamageDealt",
         hit.timestamp,
         activeTriggers,
@@ -1683,15 +2083,19 @@ export function simulateRotation(
         timeline,
         enemyAuras,
         tickQueue,
+        runtimeBuffs,
         activeCharacterId,
-      );
+      ));
       triggerArtifactResources(
         "damageDealt",
         def.id,
         hit.timestamp,
         effectiveDamageType,
         effectiveElement,
+        undefined,
+        action.actionType,
       );
+      triggerCooldownReductionOnHit(def.id, hit.timestamp, effectiveDamageType, effectiveElement, action.actionType);
       const reactionKinds = reaction.reactionKinds ?? [];
       if (reactionKinds.length > 0) {
         // Generic reaction-triggered sets (Instructor, Flower, etc.) receive
@@ -1706,6 +2110,33 @@ export function simulateRotation(
           triggerArtifactResources("reaction", def.id, hit.timestamp, undefined, undefined, eventId);
         }
         reduceArtifactCooldownsOnReaction(def.id, hit.timestamp, reactionKinds);
+      }
+    }
+
+    // A trigger declared by this cast becomes active after the cast's own
+    // damage has resolved. This is both the natural lifecycle boundary for a
+    // field/coordinated effect and prevents a newly-created effect from
+    // consuming its first proc on the hit that created it.
+    if (ability.triggers) {
+      for (const trig of ability.triggers) {
+        activeTriggers.push({
+          trigger: trig,
+          startTime: clock,
+          procCount: 0,
+          ...(trig.trigger === "onInterval" && trig.intervalSeconds !== undefined
+            ? { nextProcTime: clock + trig.intervalSeconds }
+            : {}),
+          ...(trig.snapshotMode === "cast" ? { snapshot: castSnapshot } : {}),
+        });
+      }
+    }
+
+    // Cast-owned buffs begin after the cast's damage has resolved. Keeping
+    // this generic mirrors the trigger lifecycle and prevents a newly-created
+    // field from buffing the hit that created it.
+    if (ability.buffs) {
+      for (const buff of ability.buffs) {
+        runtimeBuffs.push(materializeRuntimeBuff(buff, state, config, clock));
       }
     }
 
@@ -1738,7 +2169,7 @@ export function simulateRotation(
         activeCharacterId,
         snapshot: castSnapshot,
         enemy,
-        resolver: config.buffResolver,
+        resolver: runtimeConfig().buffResolver,
       });
 
       const gains = distributeParticles({
@@ -1847,8 +2278,21 @@ export function simulateRotation(
   // resuming from the checkpoint still owns the unfinished reaction.
   const horizon =
     config.timeLimit !== undefined ? Math.min(config.timeLimit, clock) : clock;
+  // Close any stance whose timer elapsed during the final cast. This emits
+  // state-end effects at the authored expiry timestamp even when no later
+  // action exists to perform the normal pre-action cleanup.
+  for (const state of states.values()) {
+    const activeStance = getTypedStance(state);
+    if (
+      activeStance !== undefined &&
+      clock >= activeStance.startTime + activeStance.stance.durationSeconds
+    ) {
+      endStance(state, activeStance.startTime + activeStance.stance.durationSeconds);
+    }
+  }
   processArtifactEvents(horizon);
-  drainReactionTicks(tickQueue, enemyAuras, enemy, horizon, timeline);
+  processIntervalTriggers(horizon);
+  applyEnemyDamage(drainReactionTicks(tickQueue, enemyAuras, enemy, horizon, timeline));
 
   // Ocean-Hued Clam's stored healing is an independent, mitigation-free
   // damage instance. A single team-wide foam is sufficient here: the data
@@ -1950,6 +2394,8 @@ export function simulateRotation(
       enemyAuras,
       scheduledArtifactEvents,
       normalizedHealingEvents,
+      runtimeBuffs,
+      artifactTriggerState(),
     ),
   };
 }

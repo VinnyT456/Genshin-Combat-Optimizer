@@ -27,6 +27,23 @@ import {
 } from "@/features/character-detail/perkPresentation";
 import { getCharacterMetadata } from "@/features/team-builder/rosterModel";
 import {
+  resolveInitialStatsPreview,
+  type InitialStatsPreview,
+} from "@/features/team-builder/initialStatsPreview";
+import type { CharacterEquipmentSelection } from "@/features/team-builder/equipmentSelection";
+import {
+  findWeapon,
+  findWeaponBaseAtkAtLevel,
+  findWeaponStatsAtLevel,
+} from "@/game-data/weapons/registry";
+import { DEFAULT_WEAPON_LEVEL } from "@/features/team-builder/equipmentSelection";
+import { findArtifact } from "@/game-data/artifacts/registry";
+import { getWeaponPassiveZh } from "@/lib/weaponPassiveZh";
+import { toEngineCharacter } from "@/features/simulation/simulationAdapter";
+import { talentZhForSlot } from "@/lib/characterTalentZh";
+import { applyWeaponStats } from "@/features/team-builder/weaponModel";
+import { countArtifactPiecesWithStats } from "@/features/team-builder/ArtifactStatsEditor";
+import {
   baseStatsAtLevel,
   characterLevels,
   clampCharacterLevel,
@@ -55,10 +72,121 @@ export function chinesePerkDisplayCopy(
   };
 }
 
+function InitialStatsSummary({
+  preview,
+  element,
+  weaponName,
+  weaponStatSummary,
+  weaponPassiveName,
+  weaponPassiveDescription,
+  artifactName,
+  artifactPieces,
+  artifactBonuses,
+  artifactStatCount,
+}: {
+  preview: InitialStatsPreview;
+  element: CharacterDefinition["element"];
+  weaponName?: string;
+  weaponStatSummary?: string;
+  weaponPassiveName?: string;
+  weaponPassiveDescription?: string;
+  artifactName?: string;
+  artifactPieces?: number;
+  artifactBonuses?: readonly string[];
+  artifactStatCount?: number;
+}) {
+  const rows = [
+    ["攻击力", preview.stats.atk.toLocaleString("zh-CN")],
+    ["生命值", preview.stats.hp.toLocaleString("zh-CN")],
+    ["防御力", preview.stats.def.toLocaleString("zh-CN")],
+    ["暴击率", `${(preview.stats.critRate * 100).toFixed(1)}%`],
+    ["暴击伤害", `${(preview.stats.critDmg * 100).toFixed(1)}%`],
+    ["元素充能", `${(preview.stats.energyRecharge * 100).toFixed(1)}%`],
+    ["元素精通", preview.stats.elementalMastery.toLocaleString("zh-CN")],
+    [
+      `${elementZh(element)}伤害加成`,
+      `${((preview.stats.elementalDmgBonus?.[element] ?? 0) * 100).toFixed(1)}%`,
+    ],
+  ] as const;
+
+  return (
+    <section
+      aria-label="计算起始面板"
+      className="space-y-2 rounded-xl border border-cyan-500/30 bg-cyan-950/15 p-4"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-cyan-200">
+          计算起始面板
+        </h4>
+        <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-micro text-cyan-200">
+          装备与常驻效果已合并
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {rows.map(([label, value]) => (
+          <div
+            key={label}
+            className="rounded-md border border-surface-border/60 bg-surface/60 px-2.5 py-2"
+          >
+            <div className="text-micro text-slate-400">{label}</div>
+            <div className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-slate-100">
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
+      {(weaponName || artifactName || preview.permanentBuffs > 0) && (
+        <div className="space-y-1 text-micro text-slate-300">
+          {weaponName && (
+            <p>
+              武器：{weaponName}
+              {weaponStatSummary ? " · " + weaponStatSummary : ""}
+              {weaponPassiveName ? ` · ${weaponPassiveName}常驻效果` : ""}
+            </p>
+          )}
+          {weaponPassiveDescription && (
+            <p className="leading-relaxed text-slate-400">
+              武器被动：{weaponPassiveDescription}
+            </p>
+          )}
+          {artifactName && (
+            <p>
+              圣遗物：{artifactName}
+              {artifactPieces ? ` · ${artifactPieces}件套效果` : ""}
+            </p>
+          )}
+          {artifactBonuses?.map((description, index) => (
+            <p key={`${index}-${description}`} className="leading-relaxed text-slate-400">
+              套装效果：{description}
+            </p>
+          ))}
+          {artifactName && (
+            <p className="text-slate-500">
+              {artifactStatCount
+                ? `已录入 ${artifactStatCount}/5 件圣遗物词条。`
+                : "单件圣遗物主词条与副词条暂无数据，可在圣遗物选择器中录入。"}
+            </p>
+          )}
+          {preview.permanentBuffs > 0 && (
+            <p>角色天赋与命之座：已合并 {preview.permanentBuffs} 项常驻属性效果。</p>
+          )}
+        </div>
+      )}
+      {preview.conditionalBuffs > 0 && (
+        <p className="text-micro leading-relaxed text-slate-400">
+          另有 {preview.conditionalBuffs} 项条件效果，按战斗时序、能量、生命值与触发状态实时计算，不提前写入面板。
+        </p>
+      )}
+    </section>
+  );
+}
+
 interface Props {
   open: boolean;
   character: CharacterDefinition | null;
   defaultCharacter?: CharacterDefinition | null;
+  /** Current equipment selection. Used only for the read-only stat preview. */
+  equipment?: CharacterEquipmentSelection;
   onClose: () => void;
   onSave: (
     updatedStats: Stats,
@@ -72,6 +200,7 @@ export function CharacterStatsModal({
   open,
   character,
   defaultCharacter,
+  equipment,
   onClose,
   onSave,
 }: Props) {
@@ -83,6 +212,7 @@ export function CharacterStatsModal({
       open={open}
       character={character}
       defaultCharacter={defaultCharacter}
+      equipment={equipment}
       onClose={onClose}
       onSave={onSave}
     />
@@ -93,12 +223,14 @@ function CharacterStatsModalInner({
   open,
   character,
   defaultCharacter,
+  equipment,
   onClose,
   onSave,
 }: {
   open: boolean;
   character: CharacterDefinition;
   defaultCharacter?: CharacterDefinition | null;
+  equipment?: CharacterEquipmentSelection;
   onClose: () => void;
   onSave: (
     updatedStats: Stats,
@@ -131,6 +263,7 @@ function CharacterStatsModalInner({
 
   const constellationsSimulated = anyRowSimulated(constellationRows);
   const constellationCoverage = perkCoverage(constellationRows);
+  const hideConstellationSupportLabel = character.id === "raiden-shogun";
   const passiveRows = useMemo(() => {
     const proseById = new Map<string, string>();
     for (const p of kitDetails?.passives ?? []) proseById.set(p.id, p.descriptionZh);
@@ -188,8 +321,84 @@ function CharacterStatsModalInner({
       ?.focus();
   }
 
-  const initial = character.baseStats;
   const element = character.element;
+
+  const selectedWeapon = equipment?.weaponId
+    ? findWeapon(equipment.weaponId)
+    : undefined;
+  const selectedArtifact = equipment?.artifactSetId
+    ? findArtifact(equipment.artifactSetId)
+    : undefined;
+  const selectedArtifactBonuses = selectedArtifact?.bonuses
+    .filter(
+      (bonus) =>
+        equipment?.artifactPieces !== undefined &&
+        equipment.artifactPieces >= bonus.pieces,
+    )
+    .map((bonus) => bonus.descriptionZh);
+  const selectedWeaponPassive = selectedWeapon?.passive
+    ? getWeaponPassiveZh(
+        selectedWeapon.id,
+        selectedWeapon.passive.name,
+        selectedWeapon.passive.desc,
+        equipment?.refinement,
+      )
+    : undefined;
+  const selectedWeaponStats = selectedWeapon
+    ? findWeaponStatsAtLevel(
+        selectedWeapon.id,
+        equipment?.weaponLevel ?? DEFAULT_WEAPON_LEVEL,
+      )
+    : undefined;
+  const selectedWeaponBaseAtk = selectedWeapon
+    ? selectedWeaponStats?.baseAtk ??
+      findWeaponBaseAtkAtLevel(
+        selectedWeapon.id,
+        equipment?.weaponLevel ?? DEFAULT_WEAPON_LEVEL,
+      ) ??
+      selectedWeapon.baseAtk
+    : undefined;
+  const selectedWeaponStatSummary = selectedWeapon
+    ? "基础攻击 " +
+      selectedWeaponBaseAtk +
+      ` · ${equipment?.weaponLevel ?? DEFAULT_WEAPON_LEVEL}级` +
+      (selectedWeaponStats === undefined
+        ? " · 武器副词条暂无数据"
+        : selectedWeaponStats.subStat.type === "none"
+          ? ""
+          : " · " +
+            selectedWeaponStats.subStat.labelZh +
+            " " +
+            (selectedWeaponStats.subStat.type === "elementalMastery"
+              ? selectedWeaponStats.subStat.value
+              : (selectedWeaponStats.subStat.value * 100).toFixed(1) + "%"))
+    : undefined;
+
+  /**
+   * Values shown in editable ATK/HP/DEF fields on first open. A freshly
+   * selected character has intrinsic stats without a `base` split, while the
+   * team card already treats its starter weapon as equipped. Resolve that
+   * weapon here so saving an unchanged modal cannot silently remove it. The
+   * artifact editor stays in the separate loadout; its values appear in the
+   * read-only panel and are applied by the equipment adapter exactly once.
+   */
+  const editorInitialStats = (() => {
+    if (character.baseStats.base !== undefined) return character.baseStats;
+    const curve = kit ? baseStatsAtLevel(kit, character.level) : null;
+    const source: Stats = {
+      ...(defaultCharacter?.baseStats ?? character.baseStats),
+      ...(curve ?? {}),
+      base: undefined,
+    };
+    return selectedWeapon
+      ? applyWeaponStats(
+          source,
+          selectedWeapon,
+          equipment?.weaponLevel ?? DEFAULT_WEAPON_LEVEL,
+        )
+      : source;
+  })();
+  const initial = editorInitialStats;
 
   const [atk, setAtk] = useState(initial.atk);
   const [hp, setHp] = useState(initial.hp ?? 15000);
@@ -205,9 +414,122 @@ function CharacterStatsModalInner({
     ((initial.dmgBonus ?? 0) * 100).toFixed(1),
   );
 
+  /**
+   * Canonical base split for the live level and selected weapon. The modal
+   * edits final values, but the engine also needs the underlying base values
+   * so later ATK%/HP%/DEF% equipment bonuses scale correctly.
+   */
+  const currentBase = useMemo(() => {
+    const curve = kit ? baseStatsAtLevel(kit, level) : null;
+    if (curve === null || curve === undefined) {
+      return character.baseStats.base;
+    }
+    return {
+      atk: curve.atk + (selectedWeaponBaseAtk ?? 0),
+      hp: curve.hp,
+      def: curve.def,
+    };
+  }, [character.baseStats.base, kit, level, selectedWeaponBaseAtk]);
+
+  /**
+   * Rebuild curve-driven values at a new character level while retaining the
+   * selected weapon's exact level and secondary stat. Artifact stats remain in
+   * the equipment selection and are applied by the shared preview/adapter.
+   */
+  function statsAtSelectedLevel(nextLevel: number): Stats | null {
+    if (!kit) return null;
+    const curve = baseStatsAtLevel(kit, nextLevel);
+    if (!curve) return null;
+    const intrinsic: Stats = {
+      ...(defaultCharacter?.baseStats ?? character.baseStats),
+      atk: curve.atk,
+      hp: curve.hp,
+      def: curve.def,
+      // Strip a previous weapon-resolved base split before applying the
+      // weapon again at its selected level.
+      base: undefined,
+    };
+    return selectedWeapon
+      ? applyWeaponStats(
+          intrinsic,
+          selectedWeapon,
+          equipment?.weaponLevel ?? DEFAULT_WEAPON_LEVEL,
+        )
+      : intrinsic;
+  }
+  const liveCharacter = useMemo<CharacterDefinition>(
+    () => ({
+      ...character,
+      level,
+      constellation,
+      talentLevels: {
+        normal: talentNormal,
+        skill: talentSkill,
+        burst: talentBurst,
+      },
+      baseStats: {
+        ...character.baseStats,
+        atk,
+        hp,
+        def,
+        critRate: Math.max(0, (Number(critRatePct) || 0) / 100),
+        critDmg: Math.max(0, (Number(critDmgPct) || 0) / 100),
+        energyRecharge: Math.max(1, (Number(erPct) || 100) / 100),
+        elementalMastery: Math.max(0, Number(em) || 0),
+        dmgBonus: Math.max(0, (Number(dmgBonusPct) || 0) / 100),
+        elementalDmgBonus: {
+          ...character.baseStats.elementalDmgBonus,
+          [element]: Math.max(0, (Number(elemDmgPct) || 0) / 100),
+        },
+        ...(currentBase === undefined ? {} : { base: currentBase }),
+      },
+    }),
+    [
+      character,
+      level,
+      constellation,
+      talentNormal,
+      talentSkill,
+      talentBurst,
+      atk,
+      hp,
+      def,
+      critRatePct,
+      critDmgPct,
+      erPct,
+      em,
+      dmgBonusPct,
+      element,
+      elemDmgPct,
+      currentBase,
+    ],
+  );
+  const engineCharacter = useMemo(
+    () => toEngineCharacter(liveCharacter),
+    [liveCharacter],
+  );
+  const intrinsicEngineCharacter = useMemo(
+    () => (defaultCharacter ? toEngineCharacter(defaultCharacter) : null),
+    [defaultCharacter],
+  );
+  const initialStatsPreview: InitialStatsPreview = useMemo(
+    () =>
+      resolveInitialStatsPreview({
+        character: engineCharacter,
+        intrinsicCharacter: intrinsicEngineCharacter,
+        selection: equipment,
+      }),
+    [engineCharacter, intrinsicEngineCharacter, equipment],
+  );
+
   function applyPreset(preset: "dps" | "subDps" | "em" | "default") {
     if (preset === "default" && defaultCharacter) {
-      const base = defaultCharacter.baseStats;
+      // Reset to the roster preset at the CURRENT selected character level,
+      // then reapply the selected weapon at its CURRENT weapon level. Using
+      // `defaultCharacter.baseStats` directly here would restore a level-90
+      // snapshot while the header still says (for example) level 40, and it
+      // would also drop the weapon contribution from the editable fields.
+      const base = statsAtSelectedLevel(level) ?? defaultCharacter.baseStats;
       setAtk(base.atk);
       setHp(base.hp ?? 15000);
       setDef(base.def ?? 800);
@@ -266,12 +588,11 @@ function CharacterStatsModalInner({
   function handleLevelChange(nextLevel: number) {
     const clamped = kit ? clampCharacterLevel(kit, nextLevel) : nextLevel;
     setLevel(clamped);
-    if (!kit) return;
-    const base = baseStatsAtLevel(kit, clamped);
-    if (!base) return;
-    setAtk(base.atk);
-    setHp(base.hp);
-    setDef(base.def);
+    const resolved = statsAtSelectedLevel(clamped);
+    if (!resolved) return;
+    setAtk(resolved.atk);
+    setHp(resolved.hp);
+    setDef(resolved.def);
   }
 
   function handleSave() {
@@ -289,6 +610,7 @@ function CharacterStatsModalInner({
         ...character.baseStats.elementalDmgBonus,
         [element]: Math.max(0, (Number(elemDmgPct) || 0) / 100),
       },
+      ...(currentBase === undefined ? {} : { base: currentBase }),
     };
 
     onSave(
@@ -431,6 +753,21 @@ function CharacterStatsModalInner({
                 </div>
               </div>
             )}
+
+            <InitialStatsSummary
+              preview={initialStatsPreview}
+              element={element}
+              weaponName={selectedWeapon?.nameZh}
+              weaponStatSummary={selectedWeaponStatSummary}
+              weaponPassiveName={selectedWeaponPassive?.nameZh}
+              weaponPassiveDescription={selectedWeaponPassive?.descZh}
+              artifactName={selectedArtifact?.nameZh}
+              artifactPieces={equipment?.artifactPieces}
+              artifactBonuses={selectedArtifactBonuses}
+              artifactStatCount={
+                countArtifactPiecesWithStats(equipment?.artifactLoadout)
+              }
+            />
 
             {/* Quick Archetype Preset Buttons */}
             <div className="space-y-1.5">
@@ -628,7 +965,7 @@ function CharacterStatsModalInner({
               selection's limits before they make one. Reconciled talent-level
               boosts are connected; every other effect retains the caveat.
             */}
-            <div
+            {!hideConstellationSupportLabel && <div
               className={cn(
                 "flex items-start gap-2 rounded-md border px-3 py-2 text-xs",
                 STATE_CHIP.warning,
@@ -642,7 +979,7 @@ function CharacterStatsModalInner({
                   ? "仅已建模且达到所选命座层数的效果参与计算；其余效果暂不计入。"
                   : "本角色的命之座效果尚未参与计算。层数选择会被保存。"}
               </p>
-            </div>
+            </div>}
 
             {/*
               Seven-segment single-select. `radiogroup` per §15.8: exactly one
@@ -709,7 +1046,7 @@ function CharacterStatsModalInner({
               relocate it. Counts come from the adapter as numeric slots in a
               fixed template — never a sentence assembled from fragments.
             */}
-            <div className="rounded-md border border-surface-border bg-surface/60 px-3 py-2 text-xs text-slate-300">
+            {!hideConstellationSupportLabel && <div className="rounded-md border border-surface-border bg-surface/60 px-3 py-2 text-xs text-slate-300">
               <p className="leading-relaxed">
                 命之座共 {constellationCoverage.total} 项，其中已建模{" "}
                 <span className="font-mono tabular-nums">
@@ -722,7 +1059,7 @@ function CharacterStatsModalInner({
               {tierReasonDetail !== undefined && (
                 <p className="mt-1 leading-relaxed text-slate-400">{tierReasonDetail}</p>
               )}
-            </div>
+            </div>}
 
             {constellationRows.length > 0 ? (
               <ul className="space-y-2.5">
@@ -730,7 +1067,6 @@ function CharacterStatsModalInner({
                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
                     <span className="rounded-sm bg-slate-800 px-1.5 py-0.5 text-micro font-mono font-bold text-slate-300">第 0 层</span>
                     <h5 className="text-sm font-semibold text-slate-100">无命之座</h5>
-                    <span className={cn("rounded-sm border px-1.5 py-0.5 text-micro font-medium", STATE_CHIP.success)}>基础状态 · 已解锁</span>
                   </div>
                   <p className="text-xs leading-relaxed text-slate-300">未激活任何命之座加成；角色按当前天赋等级参与计算。</p>
                 </li>
@@ -748,7 +1084,7 @@ function CharacterStatsModalInner({
                         <h5 className="text-sm font-semibold text-slate-100">
                           {copy.label}
                         </h5>
-                        {row.kind === "described-only" && (
+                        {!hideConstellationSupportLabel && row.kind === "described-only" && (
                           <span
                             className={cn(
                               "rounded-sm border px-1.5 py-0.5 text-micro font-medium",
@@ -758,7 +1094,7 @@ function CharacterStatsModalInner({
                             尚未参与计算
                           </span>
                         )}
-                        {row.kind !== "described-only" && (
+                        {!hideConstellationSupportLabel && row.kind !== "described-only" && (
                           <span
                             className={cn(
                               "rounded-sm border px-1.5 py-0.5 text-micro font-medium",
@@ -809,6 +1145,8 @@ function CharacterStatsModalInner({
                 <>
                   <AbilityCard
                     ability={kit.normalAttacks.hits[0] ?? kit.skill}
+                    nameZh={talentZhForSlot(character.id, "normal")?.nameZh}
+                    descriptionZh={talentZhForSlot(character.id, "normal")?.descriptionZh}
                     slotLabel="普通攻击"
                     level={talentNormal}
                     talentBoost={talentBoosts.normal}
@@ -816,6 +1154,8 @@ function CharacterStatsModalInner({
                   />
                   <AbilityCard
                     ability={kit.skill}
+                    nameZh={talentZhForSlot(character.id, "skill")?.nameZh}
+                    descriptionZh={talentZhForSlot(character.id, "skill")?.descriptionZh}
                     slotLabel="元素战技"
                     level={talentSkill}
                     talentBoost={talentBoosts.skill}
@@ -823,6 +1163,8 @@ function CharacterStatsModalInner({
                   />
                   <AbilityCard
                     ability={kit.burst}
+                    nameZh={talentZhForSlot(character.id, "burst")?.nameZh}
+                    descriptionZh={talentZhForSlot(character.id, "burst")?.descriptionZh}
                     slotLabel="元素爆发"
                     level={talentBurst}
                     talentBoost={talentBoosts.burst}

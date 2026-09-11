@@ -102,12 +102,12 @@ async function openWeaponPicker() {
   const slot = screen.getByLabelText(/^1 号位：/).closest("div");
   if (slot === null) throw new Error("no slot 1");
   const trigger =
-    within(slot).queryByTitle("点击更换装配武器") ??
+    within(slot).queryByTitle("点击查看武器配置") ??
     within(slot).getByRole("button", { name: /装备武器/ });
   await act(async () => {
     fireEvent.click(trigger);
   });
-  await screen.findByLabelText("精炼等级:");
+  await screen.findByRole("heading", { name: /选择武器/ });
 }
 
 async function openArtifactPicker() {
@@ -119,16 +119,11 @@ async function openArtifactPicker() {
   await act(async () => {
     fireEvent.click(trigger);
   });
-  await screen.findByLabelText("装备件数:");
+  await screen.findByRole("heading", { name: /为生之花选择套装/ });
 }
 
 /** Chooses a refinement in the open weapon picker, then equips `nameZh`. */
 async function equipWeaponAt(nameZh: string, refinement: number) {
-  await act(async () => {
-    fireEvent.change(screen.getByLabelText("精炼等级:"), {
-      target: { value: String(refinement) },
-    });
-  });
   // Once a weapon is equipped its name is also rendered in the slot behind
   // the dialog. Scope the lookup to the open picker so changing refinement
   // after the first equip remains deterministic.
@@ -138,23 +133,31 @@ async function equipWeaponAt(nameZh: string, refinement: number) {
   await act(async () => {
     fireEvent.click(card);
   });
-  await waitFor(() => expect(screen.queryByLabelText("精炼等级:")).toBeNull());
+  await screen.findByLabelText("精炼等级");
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText("精炼等级"), {
+      target: { value: String(refinement) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "装备此武器" }));
+  });
+  await waitFor(() => expect(screen.queryByRole("heading", { name: /武器详情/ })).toBeNull());
 }
 
 async function equipArtifactAt(nameZh: string, pieces: number) {
-  await act(async () => {
-    fireEvent.change(screen.getByLabelText("装备件数:"), {
-      target: { value: String(pieces) },
+  const dialog = screen.getByRole("dialog");
+  const slots = ["生之花", "死之羽", "时之沙", "空之杯", "理之冠"];
+  for (const slot of slots.slice(0, pieces)) {
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`${slot}，`) }));
     });
-  });
-  const card = screen.getByText(nameZh).closest("li");
-  if (card === null) throw new Error(`no card for ${nameZh}`);
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`将${nameZh}`) }));
+    });
+  }
   await act(async () => {
-    fireEvent.click(
-      within(card).getByRole("button", { name: /点击装配此套装|当前装备中/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
   });
-  await waitFor(() => expect(screen.queryByLabelText("装备件数:")).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +204,7 @@ describe("equipping a weapon changes the damage the dashboard shows", () => {
     expect(screen.queryByText("数值待核实")).toBeNull();
   });
 
-  it("equipping a modelled weapon raises the total damage", async () => {
+  it("equipping a modelled weapon changes the total damage", async () => {
     const weapon = findWeapon(MODELLED_POLEARM_ID);
     if (!weapon) throw new Error("fixture weapon missing");
 
@@ -214,9 +217,11 @@ describe("equipping a weapon changes the damage the dashboard shows", () => {
     await equipWeaponAt(weapon.nameZh, 1);
     await runSimulation();
 
-    // The passive is a flat DMG% grant, so the direction is knowable without
-    // reimplementing the formula: more damage, not merely different damage.
-    expect(totalDamage()).toBeGreaterThan(before);
+    // The starter build now includes its visible default weapon. Replacing it
+    // with The Catch changes base ATK, substats and passive ownership; the
+    // contract is that the selected build reaches the run, not a direction
+    // that depends on which default weapon the roster assigns.
+    expect(totalDamage()).not.toBe(before);
   });
 
   it("retains the selected refinement when the picker is reopened", async () => {
@@ -250,6 +255,62 @@ describe("equipping a weapon changes the damage the dashboard shows", () => {
     // the dialog that set it.
     const slot = screen.getByLabelText(/^1 号位：/).closest("div") as HTMLElement;
     expect(within(slot).getByText("精5")).toBeInTheDocument();
+  });
+});
+
+describe("dashboard character card editing", () => {
+  it("opens character configuration and shows talent levels when the card is clicked", async () => {
+    await renderWorkspace();
+    const slot = screen.getByLabelText(/^1 号位：/);
+    expect(within(slot).getByText("普攻")).toBeInTheDocument();
+    expect(within(slot).getByText("战技")).toBeInTheDocument();
+    expect(within(slot).getByText("爆发")).toBeInTheDocument();
+    fireEvent.click(
+      within(slot).getByRole("button", { name: /编辑雷电将军角色配置/ }),
+    );
+
+    await screen.findByRole("heading", { name: /角色养成配置/ });
+    expect(screen.getByText(/天赋：普攻/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "天赋与技能" })).toBeInTheDocument();
+  });
+
+  it("opens the same editor from the keyboard", async () => {
+    await renderWorkspace();
+    const slot = screen.getByLabelText(/^1 号位：/);
+    const editButton = within(slot).getByRole("button", {
+      name: /编辑雷电将军角色配置/,
+    });
+
+    editButton.focus();
+    fireEvent.keyDown(editButton, { key: "Enter" });
+    await screen.findByRole("heading", { name: /角色养成配置/ });
+    expect(screen.getByRole("button", { name: "天赋与技能" })).toBeInTheDocument();
+  });
+
+  it("opens the same editor with Space", async () => {
+    await renderWorkspace();
+    const slot = screen.getByLabelText(/^1 号位：/);
+    const editButton = within(slot).getByRole("button", {
+      name: /编辑雷电将军角色配置/,
+    });
+
+    editButton.focus();
+    fireEvent.keyDown(editButton, { key: " " });
+    await screen.findByRole("heading", { name: /角色养成配置/ });
+    expect(screen.getByRole("button", { name: "天赋与技能" })).toBeInTheDocument();
+  });
+
+  it("keeps equipment controls separate from character editing", async () => {
+    await renderWorkspace();
+    const slot = screen.getByLabelText(/^1 号位：/);
+    const weaponButton = within(slot).getByTitle("点击查看武器配置");
+    expect(weaponButton).not.toHaveTextContent("更换");
+
+    await act(async () => {
+      fireEvent.click(weaponButton);
+    });
+    await screen.findByRole("heading", { name: /选择武器/ });
+    expect(screen.queryByRole("heading", { name: /角色养成配置/ })).toBeNull();
   });
 });
 

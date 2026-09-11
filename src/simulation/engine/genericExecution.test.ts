@@ -399,6 +399,61 @@ describe("Generic character execution in combat engine", () => {
   });
 
   describe("5. Coordinated Attacks & Trigger Evaluation", () => {
+    it("activates a cast-declared damage trigger after the creating cast", () => {
+      const proc: KitAbility = {
+        id: "delayed-proc",
+        name: "Delayed Proc",
+        slot: "skill",
+        castTime: 0,
+        cooldown: flatTalent(0),
+        energyCost: 0,
+        instances: [{
+          id: "delayed-proc-hit",
+          name: "Proc",
+          damageType: "skill",
+          element: "pyro",
+          scaling: [{ stat: "atk", table: flatTalent(0.5) }],
+        }],
+      };
+      const skill: KitAbility = {
+        ...syntheticBurst,
+        id: "creates-trigger",
+        energyCost: 0,
+        triggers: [{
+          id: "delayed-trigger",
+          name: "Delayed Trigger",
+          trigger: "onDamageDealt",
+          durationSeconds: 10,
+          icdSeconds: 1,
+          sourceCharacterId: syntheticUnit.id,
+          ability: proc,
+        }],
+      };
+      const unit: GenericCharacterDefinition = { ...syntheticUnit, skill };
+
+      const onlyCast = simulateRotation(
+        [unit],
+        [{ characterId: unit.id, actionType: "skill" }],
+        testEnemy,
+      );
+      expect(onlyCast.timeline.filter((event) => event.type === "damage")).toHaveLength(1);
+      expect(onlyCast.timeline.some((event) => event.type === "damage" && event.damage?.abilityId === proc.id)).toBe(false);
+
+      const castThenAttack = simulateRotation(
+        [unit],
+        [
+          { characterId: unit.id, actionType: "skill" },
+          { characterId: unit.id, actionType: "normal" },
+        ],
+        testEnemy,
+      );
+      const procs = castThenAttack.timeline.filter(
+        (event) => event.type === "damage" && event.damage?.abilityId === proc.id,
+      );
+      expect(procs).toHaveLength(1);
+      expect(procs[0]!.timestamp).toBeCloseTo(1.5);
+    });
+
     it("procs off-field coordinated attack on normal attacks respecting ICD", () => {
       const coordAttack: KitAbility = {
         id: "coord-proc-hit",

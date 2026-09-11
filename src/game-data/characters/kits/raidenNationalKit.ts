@@ -571,24 +571,9 @@ export function getRaidenNationalBuffs(
         });
       }
 
-      // C4: +30% ATK to other party members
-      if (cLevel >= 4) {
-        buffs.push({
-          id: "raiden-c4-atk-bonus",
-          source: "雷电将军·誓奉庆云",
-          sourceCharacterId: char.id,
-          startTime: 0,
-          duration: Number.POSITIVE_INFINITY,
-          stacking: { mode: "refresh" },
-          targets: { scope: "party" },
-          modifiers: [
-            {
-              stat: "atkPercent",
-              value: 0.3,
-            },
-          ],
-        });
-      }
+      // C4 is state-end driven and belongs to the generic Raiden overlay.
+      // Legacy definitions have no stance lifecycle, so fail closed here
+      // rather than applying a permanent party buff.
     }
 
     // Bennett
@@ -701,4 +686,3 @@ export function getRaidenNationalBuffs(
 
   return buffs;
 }
-

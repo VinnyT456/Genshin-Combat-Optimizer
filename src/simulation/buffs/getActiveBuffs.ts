@@ -47,6 +47,7 @@ export function isWithinWindow(buff: Buff, time: number): boolean {
 export function matchesTargets(buff: Buff, query: BuffQuery): boolean {
   const characterId = query.character.id;
   const { scope, characterIds } = buff.targets;
+  if (buff.targets.excludeSource && buff.sourceCharacterId === characterId) return false;
 
   switch (scope) {
     case "party":
@@ -232,6 +233,13 @@ export function matchesConditions(
     }
   }
 
+  if (condition.requiresEnergyBelowMax) {
+    const fraction = energyFraction(
+      state.snapshot?.characters[query.character.id],
+    );
+    if (fraction === undefined || !(fraction < 1)) return false;
+  }
+
   if (condition.resources && condition.resources.length > 0) {
     // Missing `buff`/`time` means the caller cannot supply the context a
     // resource gate needs. Fail closed rather than pass by omission.
@@ -261,7 +269,12 @@ export function matchesConditions(
     }
   }
 
-  if (condition.minEnemyHpFraction !== undefined || condition.maxEnemyHpFraction !== undefined) {
+  if (
+    condition.minEnemyHpFraction !== undefined ||
+    condition.maxEnemyHpFraction !== undefined ||
+    condition.minEnemyHpFractionExclusive !== undefined ||
+    condition.maxEnemyHpFractionExclusive !== undefined
+  ) {
     const enemy = query.enemy;
     if (!enemy || enemy.maxHp === undefined || enemy.currentHp === undefined || !(enemy.maxHp > 0)) {
       return false;
@@ -269,20 +282,35 @@ export function matchesConditions(
     const fraction = enemy.currentHp / enemy.maxHp;
     if (condition.minEnemyHpFraction !== undefined && fraction < condition.minEnemyHpFraction) return false;
     if (condition.maxEnemyHpFraction !== undefined && fraction > condition.maxEnemyHpFraction) return false;
+    if (condition.minEnemyHpFractionExclusive !== undefined && fraction <= condition.minEnemyHpFractionExclusive) return false;
+    if (condition.maxEnemyHpFractionExclusive !== undefined && fraction >= condition.maxEnemyHpFractionExclusive) return false;
   }
 
   if (condition.weaponTypes) {
     if (!query.character.weaponType || !condition.weaponTypes.includes(query.character.weaponType)) return false;
   }
 
-  if (condition.minHpFraction !== undefined || condition.maxHpFraction !== undefined || condition.requiresShield !== undefined) {
+  if (
+    condition.minHpFraction !== undefined ||
+    condition.maxHpFraction !== undefined ||
+    condition.minHpFractionExclusive !== undefined ||
+    condition.maxHpFractionExclusive !== undefined ||
+    condition.requiresShield !== undefined
+  ) {
     const character = state.snapshot?.characters[query.character.id];
     if (!character) return false;
-    if (condition.minHpFraction !== undefined || condition.maxHpFraction !== undefined) {
+    if (
+      condition.minHpFraction !== undefined ||
+      condition.maxHpFraction !== undefined ||
+      condition.minHpFractionExclusive !== undefined ||
+      condition.maxHpFractionExclusive !== undefined
+    ) {
       if (character.maxHp === undefined || character.currentHp === undefined || !(character.maxHp > 0)) return false;
       const fraction = character.currentHp / character.maxHp;
       if (condition.minHpFraction !== undefined && fraction < condition.minHpFraction) return false;
       if (condition.maxHpFraction !== undefined && fraction > condition.maxHpFraction) return false;
+      if (condition.minHpFractionExclusive !== undefined && fraction <= condition.minHpFractionExclusive) return false;
+      if (condition.maxHpFractionExclusive !== undefined && fraction >= condition.maxHpFractionExclusive) return false;
     }
     if (condition.requiresShield !== undefined && character.shielded !== condition.requiresShield) return false;
   }
@@ -349,9 +377,17 @@ export function getActiveBuffs(
 
   for (let index = 0; index < state.buffs.length; index++) {
     const buff = state.buffs[index]!;
-    if (!isWithinWindow(buff, time)) continue;
+    // A cast snapshot freezes the buff's activation/condition verdict at the
+    // cast timestamp. Dynamic buffs continue to be evaluated at the hit time.
+    // The caller supplies the cast timestamp through the state snapshot, which
+    // is already immutable and shared by every hit of the cast.
+    const evaluationTime =
+      buff.snapshotMode === "snapshot" && state.snapshot !== undefined
+        ? state.snapshot.time
+        : time;
+    if (!isWithinWindow(buff, evaluationTime)) continue;
     if (!matchesTargets(buff, query)) continue;
-    if (!matchesConditions(buff.conditions, query, state, buff, time)) continue;
+    if (!matchesConditions(buff.conditions, query, state, buff, evaluationTime)) continue;
 
     const bucket = groups.get(buff.id);
     if (bucket) bucket.push({ buff, index });

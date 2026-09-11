@@ -17,6 +17,7 @@ import {
   geoGeneratedCharacters,
   hydroGeneratedCharacters,
   pyroGeneratedCharacters,
+  generatedCharactersById,
 } from "@/game-data/characters/generated";
 
 // ============================================================================
@@ -121,6 +122,32 @@ describe("constellation level changes damage end to end", () => {
     // THE deliverable: the same character, the same rotation, a different
     // constellation level, a different damage number.
     expect(atC3.totalDamage).toBeGreaterThan(atC2.totalDamage);
+  });
+
+  it("generated direct constellation modifiers change the real roster damage", () => {
+    const tighnari = generatedCharactersById.get("tighnari");
+    expect(tighnari).toBeDefined();
+    if (tighnari === undefined) return;
+
+    const rotation: Rotation = [
+      { characterId: tighnari.id, actionType: "charged" },
+    ];
+    const c0 = simulateRotation(
+      [{ ...tighnari, constellationLevel: 0 }],
+      rotation,
+      ENEMY,
+      { critMode: "expected" },
+    );
+    const c1 = simulateRotation(
+      [{ ...tighnari, constellationLevel: 1 }],
+      rotation,
+      ENEMY,
+      { critMode: "expected" },
+    );
+
+    // Tighnari C1 grants +15% Charged Attack CRIT Rate. The generated
+    // constellation buff is damage-type scoped, so it must affect this hit.
+    expect(c1.totalDamage).toBeGreaterThan(c0.totalDamage);
   });
 
   it("the boosted damage equals the damage of the equivalent talent level", () => {
@@ -434,8 +461,8 @@ describe("composition with caller-supplied resolvers", () => {
 // REAL ROSTER — the harvest must reach shipped data, not just fixtures.
 //
 // A synthetic fixture proves the mechanism. It cannot prove the mechanism finds
-// the 259 talent-level boosts the data agent actually emitted, which is the
-// whole point of the task. This block asserts against the generated roster.
+// every structured perk the generator actually emitted, which is the whole
+// point of the task. This block asserts against the generated roster.
 // ---------------------------------------------------------------------------
 
 describe("real roster", () => {
@@ -449,19 +476,27 @@ describe("real roster", () => {
     ...pyroGeneratedCharacters,
   ];
 
-  function harvestedAt(constellationLevel: number): number {
+  function harvestedAt(constellationLevel: number, ascensionPhase = 6): number {
     return ROSTER.reduce(
       (n, character) =>
-        n + harvestCharacterPerkBuffs({ ...character, constellationLevel }).length,
+        n +
+        harvestCharacterPerkBuffs({
+          ...character,
+          constellationLevel,
+          ascensionPhase,
+        }).length,
       0,
     );
   }
 
-  it("harvests every emitted perk buff at C6 and none at C0", () => {
-    // All 259 emitted perk buffs are constellation-gated (C1+), so C0 must
-    // yield zero. A non-zero C0 count would mean a perk applying unearned.
-    expect(harvestedAt(0)).toBe(0);
-    expect(harvestedAt(6)).toBeGreaterThan(0);
+  it("harvests passive buffs at C0 and constellation buffs only at C6", () => {
+    // Three unconditional generated passive buffs are available at full
+    // ascension, so C0 is not expected to be empty anymore. At ascension 0
+    // those passives are locked, which gives us a clean no-perk boundary.
+    expect(harvestedAt(0, 0)).toBe(0);
+    expect(harvestedAt(0)).toBe(3);
+    expect(harvestedAt(6)).toBe(266);
+    expect(harvestedAt(6)).toBeGreaterThan(harvestedAt(0));
   });
 
   it("the harvested count is monotonically non-decreasing in C level", () => {

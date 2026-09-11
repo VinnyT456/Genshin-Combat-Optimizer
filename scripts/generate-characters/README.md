@@ -126,8 +126,11 @@ files, not silently defaulted:
 - **Cast times** are engine defaults. Neither source publishes ability timing.
 - **Particle yields** come from Lunaris where available; characters whose entry
   omits them are flagged.
-- **Passives and constellations** are emitted empty. Both sources carry the
-  text, but their effects are prose, not machine-readable parameters.
+- **Conditional passives and constellations** remain reference-only when their
+  trigger, stack, field, or lifecycle cannot be represented by the current
+  declarative Buff vocabulary. Every unconditional structured row is emitted
+  as an executable Buff; both sources' prose is retained for the remaining
+  rows so they cannot be mistaken for damage that was simulated.
 - **Support/heal bursts** (Barbara, Xiao, Nahida, Lauma) have no damage rows in
   the source. They are emitted with a real cooldown and energy cost but zero
   damage instances, and flagged.

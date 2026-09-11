@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { applyElement } from "@/simulation/reactions/applyElement";
-import { createAura, findAura, withAura } from "@/simulation/reactions/aura";
+import {
+  createAura,
+  findAura,
+  findCompoundAura,
+  withAura,
+} from "@/simulation/reactions/aura";
 import {
   additiveBaseDamageBonus,
   amplifyingBaseMultiplier,
@@ -116,6 +121,26 @@ describe("aura consumption follows the direction", () => {
 // ---------------------------------------------------------------------------
 
 describe("which auras coexist vs overwrite", () => {
+  it("creates a Quicken compound aura with sourced duration", () => {
+    const result = applyElement(auraOf("dendro", 2), "electro", 2, 0);
+    expect(result.reactions[0]!.kind).toBe("quicken");
+    expect(findCompoundAura(result.state, "quicken", 0)?.gauge).toBeCloseTo(
+      Math.min(1.6, 1.6) * 5 + 6,
+      10,
+    );
+  });
+
+  it("uses live Quicken for Aggravate and Spread without consuming aura", () => {
+    const quickened = applyElement(auraOf("dendro", 2), "electro", 2, 0);
+    const aggravate = applyElement(quickened.state, "electro", 1, 1);
+    expect(aggravate.reactions.some((reaction) => reaction.kind === "aggravate")).toBe(true);
+    expect(findCompoundAura(aggravate.state, "quicken", 1)).toBeDefined();
+
+    const spread = applyElement(quickened.state, "dendro", 1, 1);
+    expect(spread.reactions.some((reaction) => reaction.kind === "spread")).toBe(true);
+    expect(findCompoundAura(spread.state, "quicken", 1)).toBeDefined();
+  });
+
   it("Electro-Charged leaves BOTH Hydro and Electro on the target", () => {
     const result = applyElement(auraOf("hydro", 2), "electro", 2, 0);
     expect(result.reactions[0]!.kind).toBe("electroCharged");

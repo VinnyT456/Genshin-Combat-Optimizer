@@ -57,6 +57,13 @@ export type WeaponRefinement = 1 | 2 | 3 | 4 | 5;
 export const MIN_WEAPON_REFINEMENT: WeaponRefinement = 1;
 export const MAX_WEAPON_REFINEMENT: WeaponRefinement = 5;
 
+/** Serializable weapon state-effect template before wearer identity is attached. */
+export type WeaponStateEffectTemplate = ArtifactStateEffect extends infer Effect
+  ? Effect extends { sourceCharacterId: string }
+    ? Omit<Effect, "sourceCharacterId">
+    : never
+  : never;
+
 /**
  * A weapon passive, authored once per refinement level.
  *
@@ -70,6 +77,10 @@ export interface WeaponPassiveBuffs {
   /** Provenance for UI/debugging (e.g. "Deathly Pact"). */
   name: string;
   buffsByRefinement: Readonly<Partial<Record<WeaponRefinement, readonly Buff[]>>>;
+  /** Event-driven passive effects selected alongside the owned refinement. */
+  stateEffectsByRefinement?: Readonly<
+    Partial<Record<WeaponRefinement, readonly WeaponStateEffectTemplate[]>>
+  >;
 }
 
 /**
@@ -325,6 +336,11 @@ export function harvestTeamArtifactStateEffects(
   for (const id of teamIds) {
     const equipment = asCharacterEquipmentBuffs(byCharacter[id]);
     if (!equipment) continue;
+    if (equipment.weaponPassive && equipment.refinement !== undefined && isWeaponRefinement(equipment.refinement)) {
+      for (const effect of equipment.weaponPassive.stateEffectsByRefinement?.[equipment.refinement] ?? []) {
+        out.push({ ...effect, sourceCharacterId: id } as ArtifactStateEffect);
+      }
+    }
     const setBonuses = equipment.runtimeSetBonuses ?? equipment.setBonuses;
     if (!setBonuses || setBonuses.length === 0) continue;
     const active = new Set(activeSetBonusKeys(equipment.artifacts));

@@ -161,15 +161,15 @@ describe("UNVERIFIED absence: unmodelled mechanics produce NOTHING, not a guess"
     expect(result.state.compound).toEqual([]);
   });
 
-  it("UNVERIFIED `quicken-aggravate-spread`: Quicken produces NO compound aura", () => {
+  it("Quicken creates a duration-backed compound aura", () => {
     const result = applyElement(freshAura("dendro", 2), "electro", 2, 0);
     expect(result.reactions.map((r) => r.kind)).toEqual(["quicken"]);
-    expect(result.state.compound).toEqual([]);
+    expect(result.state.compound).toHaveLength(1);
+    expect(result.state.compound[0]?.kind).toBe("quicken");
+    expect(result.state.compound[0]?.gauge).toBeCloseTo(14, 10);
   });
 
-  it("UNVERIFIED: no compound aura is EVER produced by any element pair today", () => {
-    // A single sweep, so a partially-landed compound implementation cannot
-    // slip in behind a per-pair test.
+  it("compound aura production stays limited to Quicken", () => {
     const elements: readonly Element[] = [
       "pyro",
       "hydro",
@@ -190,39 +190,21 @@ describe("UNVERIFIED absence: unmodelled mechanics produce NOTHING, not a guess"
     for (const aura of auraElements) {
       for (const trigger of elements) {
         const result = applyElement(freshAura(aura, 2), trigger, 2, 0);
-        expect(result.state.compound).toEqual([]);
+        if (result.reactions.some((reaction) => reaction.kind === "quicken")) {
+          expect(result.state.compound.map((compound) => compound.kind)).toEqual(["quicken"]);
+        } else {
+          expect(result.state.compound).toEqual([]);
+        }
       }
     }
   });
 
-  it("UNVERIFIED `quicken-aggravate-spread`: Aggravate and Spread are UNREACHABLE", () => {
-    // The coefficients exist and are single-sourced, but no application path
-    // can produce an `additive` reaction, so they cannot contribute damage.
-    const elements: readonly Element[] = [
-      "pyro",
-      "hydro",
-      "electro",
-      "cryo",
-      "dendro",
-      "anemo",
-      "geo",
-    ];
-    const auraElements: readonly AuraElement[] = [
-      "pyro",
-      "hydro",
-      "electro",
-      "cryo",
-      "dendro",
-    ];
-    for (const aura of auraElements) {
-      for (const trigger of elements) {
-        const { reactions } = applyElement(freshAura(aura, 2), trigger, 2, 0);
-        expect(reactions.some((r) => r.category === "additive")).toBe(false);
-        expect(
-          reactions.some((r) => r.kind === "aggravate" || r.kind === "spread"),
-        ).toBe(false);
-      }
-    }
+  it("Quicken enables Aggravate and Spread on later matching hits", () => {
+    const quickened = applyElement(freshAura("dendro", 2), "electro", 2, 0).state;
+    const aggravate = applyElement(quickened, "electro", 1, 1);
+    expect(aggravate.reactions.map((reaction) => reaction.kind)).toContain("aggravate");
+    const spread = applyElement(quickened, "dendro", 1, 1);
+    expect(spread.reactions.map((reaction) => reaction.kind)).toContain("spread");
   });
 
   it("UNVERIFIED `shatter-trigger` / `bloom-cores`: shattered, hyperbloom and burgeon are UNREACHABLE", () => {

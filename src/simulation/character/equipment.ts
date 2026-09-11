@@ -378,3 +378,43 @@ export function resolveEquippedStats(
     setBonusKeys: activeSetBonusKeys(equipment.artifacts),
   };
 }
+
+/**
+ * Adds artifact stats to an already-resolved panel.
+ *
+ * The website stores weapon-resolved stats on the character while artifact
+ * pieces live in the equipment selection. This helper applies only the new
+ * artifact grants, scaling percentage channels from the existing BASE split,
+ * so weapon ATK is preserved and never folded twice.
+ */
+export function applyArtifactStatsToResolvedStats(
+  stats: Stats,
+  artifacts: ArtifactLoadout | undefined,
+): Stats {
+  if (!artifacts) return stats;
+  const totals = sumEquipmentStats({ artifacts });
+  const base = stats.base ?? { atk: stats.atk, hp: stats.hp, def: stats.def };
+  const next = withBaseStats(
+    {
+      ...stats,
+      atk: foldStatChannel(stats.atk, base.atk, totals.atkPercent, totals.atkFlat).value,
+      hp: foldStatChannel(stats.hp, base.hp, totals.hpPercent, totals.hpFlat).value,
+      def: foldStatChannel(stats.def, base.def, totals.defPercent, totals.defFlat).value,
+      elementalMastery: stats.elementalMastery + totals.elementalMastery,
+      critRate: stats.critRate + totals.critRate,
+      critDmg: stats.critDmg + totals.critDmg,
+      energyRecharge: stats.energyRecharge + totals.energyRecharge,
+      dmgBonus: stats.dmgBonus + totals.dmgBonus,
+      elementalDmgBonus: Object.keys(totals.elementalDmgBonus).reduce(
+        (map, element) => {
+          const key = element as Element;
+          map[key] = (map[key] ?? 0) + (totals.elementalDmgBonus[key] ?? 0);
+          return map;
+        },
+        { ...stats.elementalDmgBonus } as Partial<Record<Element, number>>,
+      ),
+    },
+    base,
+  );
+  return next;
+}

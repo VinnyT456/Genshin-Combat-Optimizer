@@ -30,9 +30,11 @@ import {
 //   no        absent    honest empty state               (ABSENT)
 //
 // Verified against the live data at the time of writing: 1234 perk rows, with
-// 266 marked `modelled`. The reconciled 259-row talent-level subset reaches the
-// engine through generated `ConstellationDefinition.buffs`; the other seven
-// modelled rows and all 968 non-modelled rows remain DESCRIBED_ONLY.
+// 266 marked `modelled`. Every one of those rows reaches the engine through a
+// generated `ConstellationDefinition.buffs` / `PassiveDefinition.buffs`
+// entry; the remaining 968 non-modelled rows remain DESCRIBED_ONLY.
+// Character-specific runtime overlays may additionally promote a row only in
+// `buildConstellationRows`; Raiden's six rows are the first such overlay.
 //
 // Pure: no React, no DOM. Reads game-data through its public `generated` index,
 // never by reaching into an individual generated file.
@@ -74,22 +76,31 @@ export interface PerkRow {
 /**
  * Whether a perk's effects actually reach the engine.
  *
- * VERIFIED, and narrower than it looks. `support === "modelled"` is the data
- * layer's word for "EXPRESSIBLE in the Buff vocabulary with no invented
- * mechanism". It is NOT by itself a statement that the effect is applied.
- *
- * The generated presentation table and live character definitions contain the
- * same 259 talent-level boosts. That channel has been reconciled field for
- * field and is carried through the website adapter. Seven other rows marked
- * `modelled` use different channels and remain unsupported here.
- *
- * The check below is intentionally channel-specific. Widening it to every
- * `modelled` row would falsely label seven other expressible but unconnected
- * effects as simulated.
+ * `support === "modelled"` means the generator recovered an unconditional
+ * effect in the Buff vocabulary. The payload check is kept alongside it as a
+ * guard against a malformed generated row claiming support with no executable
+ * channel at all. Talent levels, stat modifiers, conversions and enemy-side
+ * modifiers are all harvested from the character definition by the simulator.
  */
 function isSimulated(perk: GeneratedPerkEffect): boolean {
-  return perk.support === "modelled" && perk.talentLevelBoost !== undefined;
+  if (perk.support !== "modelled") return false;
+  return (
+    perk.talentLevelBoost !== undefined ||
+    (perk.modifiers?.length ?? 0) > 0 ||
+    (perk.conversions?.length ?? 0) > 0 ||
+    (perk.enemyModifiers?.length ?? 0) > 0
+  );
 }
+
+/** Runtime kit overlays that are executable before generated provenance is regenerated. */
+const RUNTIME_SIMULATED_PERKS = new Set([
+  "raiden-shogun-c1",
+  "raiden-shogun-c2",
+  "raiden-shogun-c3",
+  "raiden-shogun-c4",
+  "raiden-shogun-c5",
+  "raiden-shogun-c6",
+]);
 
 function hasText(value: string | undefined): value is string {
   return value !== undefined && value.trim().length > 0;
@@ -119,7 +130,9 @@ export function buildConstellationRows(
 ): readonly PerkRow[] {
   return perkEffectsForCharacter(characterId)
     .filter((perk) => perk.kind === "constellation")
-    .map((perk) => toRow(perk, proseFor(perk.id)))
+    .map((perk) =>
+      toRow(perk, proseFor(perk.id), RUNTIME_SIMULATED_PERKS.has(perk.id)),
+    )
     .slice()
     .sort((a, b) => (a.constellationLevel ?? 0) - (b.constellationLevel ?? 0));
 }
@@ -134,11 +147,15 @@ export function buildPassiveRows(
     .map((perk) => toRow(perk, proseFor(perk.id)));
 }
 
-function toRow(perk: GeneratedPerkEffect, prose: PerkProse): PerkRow {
+function toRow(
+  perk: GeneratedPerkEffect,
+  prose: PerkProse,
+  runtimeSimulated = false,
+): PerkRow {
   return {
     id: perk.id,
     name: perk.name,
-    kind: classifyPerk(perk, prose),
+    kind: runtimeSimulated ? "simulated" : classifyPerk(perk, prose),
     ...(perk.constellationLevel === undefined
       ? {}
       : { constellationLevel: perk.constellationLevel }),

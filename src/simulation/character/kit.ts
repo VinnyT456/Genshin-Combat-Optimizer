@@ -63,6 +63,13 @@ export interface DamageInstanceDefinition {
    * instances across the timeline without a bespoke scheduler.
    */
   delay?: number;
+  /**
+   * Extra scaling supplied by a character-owned resource (for example
+   * Raiden's Resolve). The engine resolves these terms at cast time or hit
+   * time according to `snapshot`, keeping the authored coefficient separate
+   * from the mutable runtime resource value.
+   */
+  resourceScaling?: readonly ResourceScalingTerm[];
 }
 
 /** A scaling term whose multiplier varies with talent level. */
@@ -70,6 +77,15 @@ export interface TalentScalingTerm {
   stat: ScalingStat;
   /** Per-level multiplier table. Resolved via `talentValueAt`. */
   table: TalentTable;
+}
+
+/** One point of a resource contributes this much of a stat to the hit. */
+export interface ResourceScalingTerm {
+  resourceId: string;
+  stat: ScalingStat;
+  multiplierPerStack: number;
+  /** Cast snapshots persist through stance hits; hit reads the live value. */
+  snapshot?: "cast" | "hit";
 }
 
 /** Resolves a talent-indexed term to a concrete one at a given talent level. */
@@ -126,6 +142,8 @@ export interface KitAbility {
    * interpret their meaning.
    */
   effects?: readonly StateEffect[];
+  /** Declarative buffs created after all hits of this cast resolve. */
+  buffs?: readonly Buff[];
   /** Alternate combat stance entered when this ability is cast. */
   stance?: StanceDefinition<NormalAttackString, KitAbility>;
   /** Weapon infusion applied when this ability is cast. */
@@ -211,10 +229,10 @@ export interface ConstellationDefinition {
  * Declaration of a character-owned resource: a stack counter, a stance flag, a
  * cost pool (Fischl's Oz uptime, Xingqiu's raincutters, Neuvillette's stacks).
  *
- * DESIGNED, NOT IMPLEMENTED. The engine tracks the numbers generically
- * (see `runtime.ts`); what a resource MEANS is expressed by the effects that
- * read it. This is the seam through which kit-specific behaviour arrives as
- * data instead of as a branch in the engine.
+ * The engine tracks the numbers generically (see `runtime.ts`); what a
+ * resource MEANS is expressed by the effects that read it. This is the seam
+ * through which kit-specific behaviour arrives as data instead of as a branch
+ * in the engine.
  */
 export interface ResourceDefinition {
   id: string;
@@ -228,6 +246,28 @@ export interface ResourceDefinition {
    * Absent means it persists for the whole rotation.
    */
   durationSeconds?: number;
+  /**
+   * Optional event-driven gain rule for resources that respond to party burst
+   * casts. The engine evaluates this declarative rule for every burst and
+   * applies it to the owning character's resource.
+   */
+  gainOnBurstCast?: {
+    /** Resource gained per point of the triggering burst's energy cost. */
+    perEnergyCost: number;
+    /** Multiplier used when no source-element override matches. */
+    defaultMultiplier?: number;
+    /** Element-specific multiplier overrides. */
+    multipliersByElement?: Partial<Record<Element, number>>;
+    /** Do not react to the owning character's own burst cast. */
+    excludeSource?: boolean;
+  };
+  /**
+   * When true, a burst cast by the owning character consumes the current
+   * value after its hits have captured any `snapshot: "cast"` scaling terms.
+   * This is data rather than a Raiden-specific engine branch so future
+   * resource-powered bursts can use the same lifecycle.
+   */
+  consumeOnBurstCast?: boolean;
 }
 
 /** How a `StateEffect` changes a resource. */

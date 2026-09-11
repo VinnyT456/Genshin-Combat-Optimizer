@@ -1,11 +1,14 @@
 import type { Element } from "@/types";
 import {
   consumeAura,
+  createCompoundAura,
   createAura,
   decayAuraState,
+  findCompoundAura,
   findAura,
   refreshAura,
   withAura,
+  withCompoundAura,
 } from "@/simulation/reactions/aura";
 import { sanitizeGauge, sanitizeTime } from "@/simulation/reactions/finiteness";
 import {
@@ -63,6 +66,7 @@ export interface ApplyElementResult {
 const REACTIONS_THAT_KEEP_TRIGGER_AURA: ReadonlySet<string> = new Set([
   "electroCharged",
   "burning",
+  "quicken",
   "aggravate",
   "spread",
 ]);
@@ -122,6 +126,25 @@ export function applyElement(
   const reactions: ReactionResult[] = [];
   let next = decayed;
 
+  // Quicken persists as a compound aura while its underlying Electro and
+  // Dendro auras remain. Matching Electro/Dendro hits consume no aura and
+  // produce the additive Aggravate/Spread reaction instead of re-triggering
+  // Quicken. This check runs before ordinary aura iteration so the same hit
+  // cannot be counted twice against the underlying aura.
+  const quicken = findCompoundAura(next, "quicken", safeTime);
+  const quickenTrigger = quicken !== undefined &&
+    (element === "electro" || element === "dendro");
+  if (quickenTrigger) {
+    const auraElement: AuraElement = element === "electro" ? "dendro" : "electro";
+    reactions.push({
+      kind: element === "electro" ? "aggravate" : "spread",
+      category: "additive",
+      triggerElement: element,
+      auraElement,
+      gaugeConsumed: 0,
+    });
+  }
+
   // Iterate auras in the fixed AURA_ELEMENTS order rather than in state order,
   // so the reaction list is deterministic regardless of application history.
   for (const auraElement of AURA_ELEMENTS) {
@@ -132,6 +155,9 @@ export function applyElement(
 
     const rule = lookupReaction(element, auraElement);
     if (!rule) continue;
+
+    // The Quicken compound branch above owns this Electro/Dendro pair.
+    if (quickenTrigger && rule.kind === "quicken") continue;
 
     const consumesOnContact = !REACTIONS_THAT_DO_NOT_CONSUME_ON_CONTACT.has(
       rule.kind,
@@ -158,6 +184,25 @@ export function applyElement(
   // Anemo/Geo never leave an aura of their own.
   if (!appliesAura(element) || !isAuraElement(element)) {
     return { state: next, reactions };
+  }
+
+  // A first Quicken reaction creates a duration-backed compound aura. KQM's
+  // duration is min(Electro gauge, Dendro gauge) * 5 + 6; use the live aura
+  // gauge and taxed trigger gauge at the reaction timestamp.
+  const quickenReaction = reactions.find((reaction) => reaction.kind === "quicken");
+  if (quickenReaction !== undefined && quicken === undefined) {
+    const sourceAura = quickenReaction.auraElement
+      ? findAura(decayed, quickenReaction.auraElement, safeTime)
+      : undefined;
+    const minimumGauge = Math.min(
+      sourceAura?.gauge ?? 0,
+      safeGauge * 0.8,
+    );
+    next = withCompoundAura(
+      next,
+      "quicken",
+      createCompoundAura("quicken", minimumGauge * 5 + 6, safeTime),
+    );
   }
 
   const keepsAura =

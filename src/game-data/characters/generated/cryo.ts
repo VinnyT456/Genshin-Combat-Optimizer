@@ -6110,7 +6110,7 @@ export const travelerFCryo: GeneratedCharacter = {
     },
   passives: [
     { id: "traveler-f-cryo-a1", name: "Ever-Keen Frost", unlockAscension: 1, effects: [] },
-    { id: "traveler-f-cryo-a4", name: "Lucent Ice", unlockAscension: 4, effects: [] },
+    { id: "traveler-f-cryo-a4", name: "Lucent Ice", unlockAscension: 4, effects: [], buffs: [{ id: "traveler-f-cryo-a4", source: "Lucent Ice", sourceCharacterId: "traveler-f-cryo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, conversions: [{ sourceStat: "atk", targetStat: "elementalMastery", ratio: 0.08, maxCap: 160 }] }] },
     { id: "traveler-f-cryo-p3", name: "Stellar Jubilee: Illusory Frostmirror", effects: [] },
     { id: "traveler-f-cryo-p4", name: "Foreign Permafrost", effects: [] },
   ],
@@ -6391,7 +6391,7 @@ export const travelerMCryo: GeneratedCharacter = {
     },
   passives: [
     { id: "traveler-m-cryo-a1", name: "Ever-Keen Frost", unlockAscension: 1, effects: [] },
-    { id: "traveler-m-cryo-a4", name: "Lucent Ice", unlockAscension: 4, effects: [] },
+    { id: "traveler-m-cryo-a4", name: "Lucent Ice", unlockAscension: 4, effects: [], buffs: [{ id: "traveler-m-cryo-a4", source: "Lucent Ice", sourceCharacterId: "traveler-m-cryo", startTime: 0, duration: Number.POSITIVE_INFINITY, stacking: { mode: "refresh" }, targets: { scope: "self" }, conversions: [{ sourceStat: "atk", targetStat: "elementalMastery", ratio: 0.08, maxCap: 160 }] }] },
     { id: "traveler-m-cryo-p3", name: "Stellar Jubilee: Illusory Frostmirror", effects: [] },
     { id: "traveler-m-cryo-p4", name: "Foreign Permafrost", effects: [] },
   ],

@@ -33,7 +33,13 @@ import {
   resonanceShortDescZh,
 } from "@/lib/i18n";
 import type { WeaponDefinition } from "@/game-data/weapons/types";
-import { findWeapon, getDefaultWeapon } from "@/game-data/weapons/registry";
+import {
+  findWeaponBaseAtkAtLevel,
+  findWeapon,
+  findWeaponStatsAtLevel,
+  getDefaultWeapon,
+} from "@/game-data/weapons/registry";
+import { findCharacter } from "@/game-data/characters/registry";
 import { WeaponPicker } from "@/features/team-builder/WeaponPicker";
 
 import type { ArtifactSetDefinition } from "@/game-data/artifacts/types";
@@ -44,13 +50,19 @@ import { applyWeaponStats } from "@/features/team-builder/weaponModel";
 import {
   type ArtifactPieceCount,
   DEFAULT_REFINEMENT,
+  DEFAULT_WEAPON_LEVEL,
   type EquipmentSelections,
+  artifactCombinationLabel,
+  equipArtifactLoadout,
   equipArtifactSet,
   equipWeapon,
   selectionFor,
 } from "@/features/team-builder/equipmentSelection";
 import type { Refinement } from "@/features/team-builder/weaponPresentation";
 import { getCharacterMetadata } from "@/features/team-builder/rosterModel";
+import { resolveInitialStatsPreview } from "@/features/team-builder/initialStatsPreview";
+import { countArtifactPiecesWithStats } from "@/features/team-builder/ArtifactStatsEditor";
+import { baseStatsAtLevel } from "@/features/team-builder/characterProgression";
 
 interface Props {
   /** Full roster from game-data. Any length is handled; count is never assumed. */
@@ -103,6 +115,7 @@ export function TeamBuilder({
 
   const count = memberCount(team);
   const activeFollowsTimeline = result !== null;
+
   const resolvedActiveId = useMemo(
     () => resolveActiveId(team, activeCharacterId),
     [team, activeCharacterId],
@@ -128,7 +141,13 @@ export function TeamBuilder({
       // Keyed by CHARACTER ID, so moving the slot later cannot detach the
       // weapon from its owner. The refinement travels with the id.
       onEquipmentChange(
-        equipWeapon(equipment, character.id, defWeapon.id, DEFAULT_REFINEMENT),
+        equipWeapon(
+          equipment,
+          character.id,
+          defWeapon.id,
+          DEFAULT_REFINEMENT,
+          DEFAULT_WEAPON_LEVEL,
+        ),
       );
       const characterWithWeapon: CharacterDefinition = {
         ...character,
@@ -141,21 +160,34 @@ export function TeamBuilder({
   );
 
   const handleSelectWeapon = useCallback(
-    (weapon: WeaponDefinition, refinement: Refinement) => {
+    (weapon: WeaponDefinition, refinement: Refinement, weaponLevel = DEFAULT_WEAPON_LEVEL) => {
       if (weaponPickerSlot === null) return;
       const slotIndex = weaponPickerSlot;
       const character = team[slotIndex];
       if (!character) return;
 
       const baseCharacter = roster.find((c) => c.id === character.id) ?? character;
-      const nextStats = applyWeaponStats(baseCharacter.baseStats, weapon);
+      const genericCharacter = findCharacter(character.id);
+      const curve = genericCharacter
+        ? baseStatsAtLevel(genericCharacter, character.level)
+        : null;
+      const intrinsicStats = curve
+        ? {
+            ...baseCharacter.baseStats,
+            atk: curve.atk,
+            hp: curve.hp,
+            def: curve.def,
+            base: undefined,
+          }
+        : baseCharacter.baseStats;
+      const nextStats = applyWeaponStats(intrinsicStats, weapon, weaponLevel);
 
       // The refinement the user was BROWSING at is the refinement they own.
       // It was previously discarded on select, so every equipped weapon
       // simulated at R1 — `harvestWeaponPassiveBuffs` indexes per-refinement
       // data, so that was a wrong damage number, not a cosmetic gap.
       onEquipmentChange(
-        equipWeapon(equipment, character.id, weapon.id, refinement),
+        equipWeapon(equipment, character.id, weapon.id, refinement, weaponLevel),
       );
       const updatedChar: CharacterDefinition = {
         ...character,
@@ -173,24 +205,33 @@ export function TeamBuilder({
 
 
   const handleSelectArtifact = useCallback(
-    (artifact: ArtifactSetDefinition | null, pieces: ArtifactPieceCount) => {
+    (
+      artifact: ArtifactSetDefinition | null,
+      pieces: ArtifactPieceCount,
+      artifactLoadout?: import("@/simulation/character/equipment").ArtifactLoadout,
+    ) => {
       if (artifactPickerSlot === null) return;
       const slotIndex = artifactPickerSlot;
       const character = team[slotIndex];
       if (!character) return;
 
       onEquipmentChange(
-        equipArtifactSet(
-          equipment,
-          character.id,
-          artifact ? artifact.id : null,
-          pieces,
-        ),
+        artifactLoadout && Object.keys(artifactLoadout).length > 0
+          ? equipArtifactLoadout(equipment, character.id, artifactLoadout)
+          : equipArtifactSet(
+              equipment,
+              character.id,
+              artifact ? artifact.id : null,
+              pieces,
+            ),
       );
       const charZh = charNameZh(character.name) || character.name;
       if (artifact) {
+        const combination = artifactCombinationLabel(artifactLoadout);
         setAnnouncement(
-          `已为 ${charZh} 装备圣遗物套装: ${artifact.nameZh}（${pieces} 件套）。`,
+          combination
+            ? `已为 ${charZh} 保存圣遗物组合：${combination}。`
+            : `已为 ${charZh} 装备圣遗物套装: ${artifact.nameZh}（${pieces} 件套）。`,
         );
       } else {
         setAnnouncement(`已卸下 ${charZh} 的圣遗物套装。`);
@@ -317,8 +358,28 @@ export function TeamBuilder({
           const equippedWeapon = currentWeaponId
             ? findWeapon(currentWeaponId) ?? getDefaultWeapon(meta.weaponType)
             : getDefaultWeapon(meta.weaponType);
+          const currentWeaponLevel = selection.weaponLevel ?? DEFAULT_WEAPON_LEVEL;
+          const equippedWeaponStats = findWeaponStatsAtLevel(
+            equippedWeapon.id,
+            currentWeaponLevel,
+          );
+          // The card has always shown a default weapon for an empty selection.
+          // Use that same weapon for the visible starting panel, otherwise the
+          // card says Homa while the numbers still describe a bare character.
+          const displaySelection = currentWeaponId
+            ? selection
+            : {
+                weaponId: equippedWeapon.id,
+                refinement: DEFAULT_REFINEMENT,
+                weaponLevel: DEFAULT_WEAPON_LEVEL,
+              };
           const currentArtifactId = selection.artifactSetId ?? null;
           const equippedArtifact = currentArtifactId ? findArtifact(currentArtifactId) ?? null : null;
+          const displayStats = resolveInitialStatsPreview({
+            character,
+            intrinsicCharacter: roster.find((candidate) => candidate.id === character.id),
+            selection: displaySelection,
+          }).stats;
 
 
           return (
@@ -343,8 +404,28 @@ export function TeamBuilder({
               // Only stated when the user actually chose one: rendering a
               // default refinement the selection does not carry would show a
               // number the simulation does not use (the harvest fails closed).
-              weaponRefinement={currentWeaponId ? selection.refinement : undefined}
+              weaponRefinement={displaySelection.refinement}
+              weaponLevel={displaySelection.weaponLevel}
+              weaponBaseAtk={
+                equippedWeaponStats?.baseAtk ??
+                findWeaponBaseAtkAtLevel(equippedWeapon.id, currentWeaponLevel) ??
+                equippedWeapon.baseAtk
+              }
+              weaponSubStat={
+                equippedWeaponStats?.subStat
+              }
               artifactPieces={equippedArtifact ? selection.artifactPieces : undefined}
+              artifactCombination={
+                equippedArtifact
+                  ? artifactCombinationLabel(selection.artifactLoadout)
+                  : undefined
+              }
+              artifactStatCount={
+                equippedArtifact
+                  ? countArtifactPiecesWithStats(selection.artifactLoadout)
+                  : undefined
+              }
+              displayStats={displayStats}
             />
           );
         })}
@@ -434,6 +515,23 @@ export function TeamBuilder({
         open={editingSlot !== null}
         character={editingCharacter}
         defaultCharacter={editingDefaultCharacter}
+        equipment={
+            editingCharacter
+            ? (() => {
+                const selection = selectionFor(equipment, editingCharacter.id);
+                if (selection.weaponId !== undefined) return selection;
+                const defaultWeapon = getDefaultWeapon(
+                  getCharacterMetadata(editingCharacter.id).weaponType,
+                );
+                return {
+                  ...selection,
+                  weaponId: defaultWeapon.id,
+                  refinement: DEFAULT_REFINEMENT,
+                  weaponLevel: DEFAULT_WEAPON_LEVEL,
+                };
+              })()
+            : undefined
+        }
         onClose={() => setEditingSlot(null)}
         onSave={handleSaveStats}
       />
@@ -457,6 +555,10 @@ export function TeamBuilder({
           currentRefinement={
             selectionFor(equipment, team[weaponPickerSlot]!.id).refinement
           }
+          currentWeaponLevel={
+            selectionFor(equipment, team[weaponPickerSlot]!.id).weaponLevel ??
+            DEFAULT_WEAPON_LEVEL
+          }
           onClose={() => setWeaponPickerSlot(null)}
           onSelect={handleSelectWeapon}
         />
@@ -474,6 +576,9 @@ export function TeamBuilder({
           }
           currentPieces={
             selectionFor(equipment, team[artifactPickerSlot]!.id).artifactPieces
+          }
+          currentArtifactLoadout={
+            selectionFor(equipment, team[artifactPickerSlot]!.id).artifactLoadout
           }
           onClose={() => setArtifactPickerSlot(null)}
           onSelect={handleSelectArtifact}

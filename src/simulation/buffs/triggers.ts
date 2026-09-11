@@ -1,4 +1,6 @@
 // ============================================================================
+
+import type { Buff } from "@/simulation/buffs/types";
 // Coordinated Attacks & Trigger Declarations.
 //
 // Models reactive / triggered effects (Xingqiu rain swords on normal attack,
@@ -15,7 +17,9 @@ export type TriggerType =
   | "onSkillCast"
   | "onBurstCast"
   | "onDamageDealt"
-  | "onReaction";
+  | "onReaction"
+  /** Time-driven field proc, evaluated at each declared interval. */
+  | "onInterval";
 
 /**
  * Declaration of a triggered / coordinated effect.
@@ -26,10 +30,16 @@ export interface TriggeredEffectDefinition<TAbility = unknown> {
   trigger: TriggerType;
   durationSeconds: number;
   icdSeconds: number;
+  /** Interval for time-driven triggers. Required when trigger is onInterval. */
+  intervalSeconds?: number;
+  /** Whether the proc uses the creating cast's stat snapshot. */
+  snapshotMode?: "cast" | "dynamic";
   maxProcs?: number;
   sourceCharacterId: string;
   /** Ability executed when this effect triggers (e.g. coordinated attack). */
   ability?: TAbility;
+  /** Declarative buffs created after the triggered ability resolves. */
+  buffs?: readonly Buff[];
 }
 
 /**

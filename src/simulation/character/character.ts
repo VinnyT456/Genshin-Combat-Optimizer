@@ -181,8 +181,26 @@ export function unlockedPassives(
 export function activeConstellations(
   def: GenericCharacterDefinition,
 ): readonly ConstellationDefinition[] {
+  // Definitions normally come from generated, validated data, but this is a
+  // public runtime seam and website/session payloads are deserialised input.
+  // An out-of-range or non-finite level cannot identify a legal C0--C6 state;
+  // fail closed rather than treating (for example) C99 as ownership of every
+  // constellation and leaking its damage/stat/energy effects.
+  if (
+    !Number.isInteger(def.constellationLevel) ||
+    def.constellationLevel < 0 ||
+    def.constellationLevel > 6
+  ) {
+    return [];
+  }
   return def.constellations
-    .filter((c) => c.level <= def.constellationLevel)
+    .filter(
+      (c) =>
+        Number.isInteger(c.level) &&
+        c.level >= 1 &&
+        c.level <= 6 &&
+        c.level <= def.constellationLevel,
+    )
     .slice()
     .sort((a, b) => a.level - b.level);
 }

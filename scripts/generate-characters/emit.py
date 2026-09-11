@@ -170,12 +170,12 @@ def ts_number(value: float) -> str:
 # this task does not own, so widening them is not on the table here.
 #
 # So the character definition receives the IDENTITY of every constellation and
-# passive (level, name, unlock, empty effects) -- which is real progress over
-# the empty arrays it had -- and the machine-readable EFFECTS are emitted
-# alongside it in `perkEffects.ts`, a data-only module in `src/game-data`.
-# Joining the two by id is a one-liner for whoever wires the buff system up.
+# passive (level, name, unlock, empty state effects) plus executable Buffs for
+# every unconditional structured row. The machine-readable EFFECTS table is
+# also emitted alongside it in `perkEffects.ts`, a data-only module in
+# `src/game-data`, so display and execution can be audited by id.
 #
-# THAT BLOCKER IS NOW CLEARED, FOR TALENT-LEVEL BOOSTS.
+# THAT BLOCKER IS NOW CLEARED FOR EVERY STRUCTURED, UNCONDITIONAL EFFECT.
 #
 # combat-engineer added `buffs?: readonly Buff[]` to `PassiveDefinition` and
 # `ConstellationDefinition` as a SIBLING of `effects` (not a widening of it),
@@ -184,15 +184,12 @@ def ts_number(value: float) -> str:
 # match the emitted `PerkTalentSlot`, so a parsed `talentLevelBoost` maps 1:1
 # with NO translation table.
 #
-# So talent-level boosts are now emitted ON the character, as buffs. WHY ONLY
-# THESE: a talent-level boost is the one recovered effect whose ENTIRE meaning
-# is two published fields (which talent, how many levels). It carries no
-# duration, no stack ceiling and no trigger condition to invent. Every other
-# recovered effect (a conditional ATK%, a stacking DMG bonus) is described only
-# in prose whose uptime and stack cap neither source publishes -- emitting those
-# as always-on permanent buffs would OVERSTATE them, which is the failure mode
-# ROADMAP.md 0 puts above all others. They stay in `perkEffects.ts` with their
-# bucket until a channel exists for their gating.
+# Structured rows are emitted ON the character as buffs. The parser only puts
+# unconditional rows in this bucket, so a permanent self-targeted buff is the
+# narrowest safe representation for the current data. Conditional prose remains
+# in `perkEffects.ts` with its honest bucket until the required trigger or
+# resource lifecycle is available; it must never be promoted to an always-on
+# effect merely because a number was present in the source text.
 
 #: Bucket -> the TS union member recorded on every emitted perk row.
 SUPPORT_BY_BUCKET = {
@@ -283,22 +280,33 @@ BUFF_PERMANENT_DURATION = "Number.POSITIVE_INFINITY"
 # applications of the same id must not compound. `stack` would additionally
 # require a `maxStacks` neither source publishes.
 BUFF_STACKING_REFRESH = '{ mode: "refresh" }'
-# `self`: a talent-level boost raises THIS character's own talent row. Scope
-# `self` requires `sourceCharacterId`, which is emitted alongside.
+# `self`: these unconditional perk effects belong to the character that owns
+# them. Scope `self` requires `sourceCharacterId`, which is emitted alongside.
 BUFF_TARGETS_SELF = '{ scope: "self" }'
 
 
-def emit_talent_level_buff(character_id: str, perk: perks.ParsedPerk) -> str | None:
-    """
-    One `Buff` literal for a perk that raises a talent's LEVEL, or None.
+def emit_structured_perk_buff(
+    character_id: str, perk: perks.ParsedPerk
+) -> str | None:
+    """Emit one executable Buff for an unconditional structured perk row.
 
-    Returns None for every perk with no parsed `talent_level_boost`, so a perk
-    whose effect this generator could not read contributes NOTHING rather than
-    an empty or invented buff.
+    The parser's ``expressible`` bucket is deliberately conservative: every
+    row here has a complete, unconditional effect that the Buff vocabulary can
+    represent.  Keep the conversion in the generator so generated character
+    definitions, the generated effect index, and the runtime harvester cannot
+    drift apart.  Rows without a structured payload (which should only be
+    talent-level rows after the old path is removed) return ``None``.
     """
-    if perk.talent_level_boost is None:
+    if perk.bucket != perks.BUCKET_EXPRESSIBLE:
         return None
-    slot, levels = perk.talent_level_boost
+    if not (
+        perk.modifiers
+        or perk.conversions
+        or perk.enemy_modifiers
+        or perk.talent_level_boost
+    ):
+        return None
+
     buff_id = f"{character_id}-{perk.id_suffix}"
     parts = [
         f"id: {ts_string(buff_id)}",
@@ -308,11 +316,30 @@ def emit_talent_level_buff(character_id: str, perk: perks.ParsedPerk) -> str | N
         f"duration: {BUFF_PERMANENT_DURATION}",
         f"stacking: {BUFF_STACKING_REFRESH}",
         f"targets: {BUFF_TARGETS_SELF}",
-        (
+    ]
+
+    # Talent-level boosts are selected by their talent slot, not by the
+    # damage type of an individual hit. The normal-attack talent also owns
+    # charged and plunging multipliers, so scoping a normal boost to
+    # `damageTypes: ["normal"]` would silently drop it from those rows.
+    if perk.damage_types and perk.talent_level_boost is None:
+        rendered = ", ".join(ts_string(d) for d in perk.damage_types)
+        parts.append(f"conditions: {{ damageTypes: [{rendered}] }}")
+    if perk.modifiers:
+        rendered = ", ".join(emit_modifier(m) for m in perk.modifiers)
+        parts.append(f"modifiers: [{rendered}]")
+    if perk.conversions:
+        rendered = ", ".join(emit_conversion(c) for c in perk.conversions)
+        parts.append(f"conversions: [{rendered}]")
+    if perk.enemy_modifiers:
+        rendered = ", ".join(emit_enemy_modifier(e) for e in perk.enemy_modifiers)
+        parts.append(f"enemyModifiers: [{rendered}]")
+    if perk.talent_level_boost:
+        slot, levels = perk.talent_level_boost
+        parts.append(
             "talentLevelModifiers: [{ slot: "
             f"{ts_string(slot)}, levels: {levels} }}]"
-        ),
-    ]
+        )
     return "{ " + ", ".join(parts) + " }"
 
 
@@ -326,8 +353,9 @@ def emit_perk_identities(character_id: str, rows: list[perks.ParsedPerk]) -> lis
     array look populated is exactly the plausible-but-wrong data this generator
     exists to prevent.
 
-    `buffs` IS populated, for talent-level boosts only -- see the block comment
-    above for why those and nothing else. The key is OMITTED, never emitted as
+    `buffs` is populated for every unconditional structured row -- stat
+    modifiers, conversions, enemy modifiers, and talent-level boosts. The key
+    is OMITTED, never emitted as
     `[]`, when a perk has no such boost, matching how the buff bag is treated
     elsewhere (an empty bag and an absent one must not hash differently).
     """
@@ -346,7 +374,7 @@ def emit_perk_identities(character_id: str, rows: list[perks.ParsedPerk]) -> lis
             if row.unlock_ascension is not None:
                 parts.append(f"unlockAscension: {row.unlock_ascension}")
             parts.append("effects: []")
-            buff = emit_talent_level_buff(character_id, row)
+            buff = emit_structured_perk_buff(character_id, row)
             if buff is not None:
                 parts.append(f"buffs: [{buff}]")
             lines.append("    { " + ", ".join(parts) + " },")
@@ -367,7 +395,7 @@ def emit_perk_identities(character_id: str, rows: list[perks.ParsedPerk]) -> lis
                 f"name: {ts_string(row.name)}",
                 "effects: []",
             ]
-            buff = emit_talent_level_buff(character_id, row)
+            buff = emit_structured_perk_buff(character_id, row)
             if buff is not None:
                 parts.append(f"buffs: [{buff}]")
             lines.append("    { " + ", ".join(parts) + " },")
@@ -1290,7 +1318,7 @@ export interface GeneratedPerkEffect {{
   enemyModifiers?: readonly PerkEnemyModifier[];
   /** Damage types the effect is scoped to. Absent means unscoped. */
   damageTypes?: readonly string[];
-  /** A talent-level boost -- structured, but with no home in `Buff`. */
+  /** A talent-level boost, emitted as a `Buff` on the character definition. */
   talentLevelBoost?: {{ slot: PerkTalentSlot; levels: number }};
   /** Why the row is not `modelled`. Absent when it is. */
   reason?: string;
