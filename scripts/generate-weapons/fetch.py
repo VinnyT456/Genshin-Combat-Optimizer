@@ -82,6 +82,16 @@ def write_json(path: pathlib.Path, payload: object) -> None:
     )
 
 
+def cached_lunaris_version(cache: pathlib.Path) -> str | None:
+    """Return the version that produced this cache, if it is trustworthy."""
+    try:
+        payload = json.loads((cache / "_provenance.json").read_text("utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    version = payload.get("lunarisVersion") if isinstance(payload, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
 def fetch_all(cache: pathlib.Path, force: bool) -> None:
     listing = get_json(AMBER_LIST)
     if not isinstance(listing, dict):
@@ -102,6 +112,12 @@ def fetch_all(cache: pathlib.Path, force: bool) -> None:
     weapon_ids = sorted(items, key=int)
     print(f"Amber publishes {len(weapon_ids)} weapons; Lunaris version {version}")
 
+    # Verifier detail files are version-sensitive. Never reuse a detail row
+    # fetched for another Lunaris build: it can look structurally valid while
+    # corroborating the wrong release. A missing or stale row is deliberately
+    # left for the emitter to withhold rather than treated as evidence.
+    refresh_lunaris = force or cached_lunaris_version(cache) != version
+
     fetched = skipped = missing = 0
     for weapon_id in weapon_ids:
         amber_path = cache / "amber" / f"{weapon_id}.json"
@@ -113,7 +129,7 @@ def fetch_all(cache: pathlib.Path, force: bool) -> None:
             skipped += 1
 
         lunaris_path = cache / "lunaris" / f"{weapon_id}.json"
-        if force or not lunaris_path.exists():
+        if refresh_lunaris or not lunaris_path.exists():
             try:
                 write_json(
                     lunaris_path,

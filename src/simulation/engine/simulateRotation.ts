@@ -26,6 +26,7 @@ import { CONFIG_WARNING_ACTION_INDEX, impliedBaseStats, withBaseStats } from "@/
 import { computeDamage } from "@/simulation/damage/pipeline";
 import {
   DEFAULT_SWAP_COST_SECONDS,
+  EPSILON,
   MIN_SWAP_COST_SECONDS,
 } from "@/simulation/engine/constants";
 import { resolveStats } from "@/simulation/engine/buffSeam";
@@ -875,6 +876,15 @@ export function simulateRotation(
     ),
     harvestTeamResonanceBuffs(team),
   );
+  // NaN has no ordering relation with any timestamp. Treat it as the
+  // smallest horizon so malformed callers cannot silently disable the event
+  // bound and drain every pending tick. Preserve Infinity as unbounded.
+  const timeLimit =
+    config.timeLimit !== undefined && Number.isNaN(config.timeLimit)
+      ? 0
+      : config.timeLimit !== undefined && config.timeLimit === Number.NEGATIVE_INFINITY
+        ? 0
+        : config.timeLimit;
   const runtimeBuffs: Buff[] = [];
 
   const errors: string[] = [];
@@ -1669,7 +1679,7 @@ export function simulateRotation(
       states,
       time: clock,
       activeCharacterId,
-      config,
+      config: timeLimit === config.timeLimit ? config : { ...config, timeLimit },
     });
 
     if (!verdict.valid) {
@@ -1929,6 +1939,21 @@ export function simulateRotation(
 
     for (let hitIndex = 0; hitIndex < materializedHits.length; hitIndex++) {
       const hit = materializedHits[hitIndex]!;
+      // Action legality uses cast-start time. Delayed hits use event time, so
+      // an accepted cast cannot leak damage beyond a finite event horizon.
+      if (timeLimit !== undefined && hit.timestamp > timeLimit + EPSILON) {
+        continue;
+      }
+      // Delayed hits are events on the same canonical clock. Drain pending
+      // reaction work before a hit at that timestamp, including equal-time
+      // boundaries. This prevents a delayed hit from jumping over an EC tick.
+      const eventHorizon =
+        timeLimit !== undefined ? Math.min(timeLimit, hit.timestamp) : hit.timestamp;
+      if (eventHorizon >= clock - 1e-9) {
+        applyEnemyDamage(
+          drainReactionTicks(tickQueue, enemyAuras, enemy, eventHorizon, timeline),
+        );
+      }
       const hitEnemy = enemyAtHit();
       const effectiveElement = resolveInfusedElement(
         hit.element,
@@ -2277,7 +2302,7 @@ export function simulateRotation(
   // aura state they would have consumed stays in `finalState`, so a caller
   // resuming from the checkpoint still owns the unfinished reaction.
   const horizon =
-    config.timeLimit !== undefined ? Math.min(config.timeLimit, clock) : clock;
+    timeLimit !== undefined ? Math.min(timeLimit, clock) : clock;
   // Close any stance whose timer elapsed during the final cast. This emits
   // state-end effects at the authored expiry timestamp even when no later
   // action exists to perform the normal pre-action cleanup.

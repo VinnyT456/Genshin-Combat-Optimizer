@@ -58,6 +58,11 @@ import {
   equipWeapon,
   selectionFor,
 } from "@/features/team-builder/equipmentSelection";
+import {
+  baseBuildArtifactLoadout,
+  equippedMatchesBaseBuild,
+  recommendedBuildFor,
+} from "@/game-data/characters/recommendedBuilds";
 import type { Refinement } from "@/features/team-builder/weaponPresentation";
 import { getCharacterMetadata } from "@/features/team-builder/rosterModel";
 import { resolveInitialStatsPreview } from "@/features/team-builder/initialStatsPreview";
@@ -135,25 +140,51 @@ export function TeamBuilder({
 
   const handleSelect = useCallback(
     (slotIndex: number, character: CharacterDefinition) => {
-      setAnnouncement(describeSelection(team, slotIndex, character));
       const meta = getCharacterMetadata(character.id);
-      const defWeapon = getDefaultWeapon(meta.weaponType);
-      // Keyed by CHARACTER ID, so moving the slot later cannot detach the
-      // weapon from its owner. The refinement travels with the id.
-      onEquipmentChange(
-        equipWeapon(
-          equipment,
-          character.id,
-          defWeapon.id,
-          DEFAULT_REFINEMENT,
-          DEFAULT_WEAPON_LEVEL,
-        ),
+      // A character with a recommended base build gets that build's weapon +
+      // 4pc set + main stats; everyone else keeps the generic weapon-type
+      // default and no artifacts. Keyed by CHARACTER ID, so reordering the
+      // party can never detach a build from its owner. Reuses the existing
+      // equip helpers — no equipment logic is reimplemented here.
+      const baseBuild = recommendedBuildFor(character.id);
+      const buildWeapon =
+        (baseBuild ? findWeapon(baseBuild.weaponId) : undefined) ??
+        getDefaultWeapon(meta.weaponType);
+
+      let nextEquipment = equipWeapon(
+        equipment,
+        character.id,
+        buildWeapon.id,
+        DEFAULT_REFINEMENT,
+        DEFAULT_WEAPON_LEVEL,
       );
+      if (baseBuild) {
+        nextEquipment = equipArtifactLoadout(
+          nextEquipment,
+          character.id,
+          baseBuildArtifactLoadout(baseBuild),
+        );
+      }
+      onEquipmentChange(nextEquipment);
+
       const characterWithWeapon: CharacterDefinition = {
         ...character,
-        baseStats: applyWeaponStats(character.baseStats, defWeapon),
+        baseStats: applyWeaponStats(character.baseStats, buildWeapon),
       };
       onTeamChange(setSlot(team, slotIndex, characterWithWeapon));
+
+      // Announce the selection, and when a KQM base build was applied, name the
+      // weapon + set that was auto-equipped so a recommended build is never
+      // applied silently (screen-reader live region, existing announcement style).
+      const baseSet = baseBuild ? findArtifact(baseBuild.artifactSetId) : null;
+      if (baseBuild && baseSet) {
+        const charZh = charNameZh(character.name) || character.name;
+        setAnnouncement(
+          `已为 ${charZh} 应用 KQM 基准配装：武器 ${buildWeapon.nameZh}，圣遗物 ${baseSet.nameZh}（4件套）。`,
+        );
+      } else {
+        setAnnouncement(describeSelection(team, slotIndex, character));
+      }
       setPickerSlot(null);
     },
     [team, onTeamChange, equipment, onEquipmentChange],
@@ -375,6 +406,26 @@ export function TeamBuilder({
               };
           const currentArtifactId = selection.artifactSetId ?? null;
           const equippedArtifact = currentArtifactId ? findArtifact(currentArtifactId) ?? null : null;
+          // Surface when the equipped gear STILL MATCHES this character's KQM
+          // base build: weapon id, set id AND the sands/goblet/circlet main-stat
+          // channels all conform. A hand-modified main stat (e.g. a swapped
+          // goblet) drops the match, so the chip describes STATE, not provenance.
+          // Keyed by character id so party reordering never mislabels a slot.
+          // The circletNote is gated on the same match — shown only while the
+          // circlet still conforms.
+          const baseBuild = recommendedBuildFor(character.id);
+          const equippedLoadout = selection.artifactLoadout;
+          const isRecommendedBuild =
+            baseBuild !== undefined &&
+            equippedMatchesBaseBuild(baseBuild, {
+              weaponId: currentWeaponId,
+              artifactSetId: currentArtifactId ?? undefined,
+              sands: equippedLoadout?.sands?.mainStat,
+              goblet: equippedLoadout?.goblet?.mainStat,
+              circlet: equippedLoadout?.circlet?.mainStat,
+            });
+          const buildCircletNote =
+            isRecommendedBuild && baseBuild ? baseBuild.circletNote : undefined;
           const displayStats = resolveInitialStatsPreview({
             character,
             intrinsicCharacter: roster.find((candidate) => candidate.id === character.id),
@@ -426,6 +477,8 @@ export function TeamBuilder({
                   : undefined
               }
               displayStats={displayStats}
+              isRecommendedBuild={isRecommendedBuild}
+              circletNote={buildCircletNote}
             />
           );
         })}

@@ -23,7 +23,9 @@ export type SearchPhase =
   /** No search has been run in this session. */
   | "idle"
   /** A search is executing. */
+  | "queued"
   | "searching"
+  | "canceling"
   /** A synchronous adapter cannot cancel yet, but the view model reserves this state. */
   | "canceled"
   | "failed"
@@ -33,7 +35,7 @@ export type SearchPhase =
   | "empty";
 
 export const SEARCH_UNSUPPORTED_NOTICE =
-  "当前搜索适配器仍在主线程同步执行，取消与实时进度将在搜索任务接口可用后启用。";
+  "搜索在独立 Worker 中执行；当前仅展示 Worker 已确认的状态，不推测进度。";
 
 export interface BudgetOption {
   readonly id: SearchBudget;
@@ -81,7 +83,7 @@ export const ADOPT_SAFETY_NOTICE =
   "复制会替换编辑器中的当前循环。第一次复制前的循环会保留，可在手动编辑前还原。";
 
 export const SEARCHING_NOTICE =
-  "正在搜索循环…当前适配器在主线程同步执行，暂不提供虚假的进度或取消按钮。";
+  "正在搜索循环…";
 
 export const EMPTY_RESULT_NOTICE =
   "本次搜索在上述阵容、敌人、时间窗口与投入程度下未返回候选。";

@@ -44,19 +44,45 @@ export interface SearchJobFailure extends SearchRequestIdentity {
   readonly kind: "failed";
   readonly code: "invalid-request" | "execution-failed";
   readonly message: string;
+  readonly attempt: number;
+  readonly retryable: boolean;
 }
 
-export type SearchJobResponse = SearchJobSuccess | SearchJobFailure;
+export interface SearchJobCanceled extends SearchRequestIdentity {
+  readonly kind: "canceled";
+  readonly reason: "requested" | "worker-terminated";
+}
 
-export type SearchTransportEvent =
-  | ({ readonly type: "started" } & SearchRequestIdentity)
+export type SearchJobResponse = SearchJobSuccess | SearchJobFailure | SearchJobCanceled;
+
+export type SearchWorkerRequest =
+  | { readonly type: "search"; readonly request: SearchJobRequest; readonly attempt: number }
+  | { readonly type: "cancel"; readonly requestId: string; readonly inputFingerprint: string };
+
+export type SearchWorkerMessage =
+  | ({ readonly type: "started"; readonly attempt: number } & SearchRequestIdentity)
+  | ({ readonly type: "progress"; readonly progress: SearchProgress } & SearchRequestIdentity)
   | ({ readonly type: "completed"; readonly response: SearchJobSuccess } & SearchRequestIdentity)
   | ({ readonly type: "failed"; readonly response: SearchJobFailure } & SearchRequestIdentity);
+
+export interface SearchProgress {
+  readonly kind: "indeterminate";
+  readonly nodesExpanded: number;
+}
+
+export type SearchTransportEvent =
+  | ({ readonly type: "started"; readonly attempt: number } & SearchRequestIdentity)
+  | ({ readonly type: "progress"; readonly progress: SearchProgress } & SearchRequestIdentity)
+  | ({ readonly type: "completed"; readonly response: SearchJobSuccess } & SearchRequestIdentity)
+  | ({ readonly type: "failed"; readonly response: SearchJobFailure } & SearchRequestIdentity)
+  | ({ readonly type: "canceled"; readonly response: SearchJobCanceled } & SearchRequestIdentity);
 
 export interface SearchTransportJob {
   readonly identity: SearchRequestIdentity;
   readonly capabilities: SearchTransportCapabilities;
-  readonly cancel: () => { readonly acknowledged: false; readonly reason: "unsupported" };
+  readonly cancel: () =>
+    | { readonly acknowledged: false; readonly reason: "unsupported" | "not-running" }
+    | { readonly acknowledged: true; readonly reason: "requested" };
   readonly run: (onEvent?: (event: SearchTransportEvent) => void) => Promise<SearchJobResponse>;
 }
 
@@ -149,7 +175,7 @@ export function createLocalSearchJob(envelope: SearchJobRequest): SearchTranspor
   };
 
   const run = async (onEvent?: (event: SearchTransportEvent) => void): Promise<SearchJobResponse> => {
-    onEvent?.({ type: "started", ...identity });
+    onEvent?.({ type: "started", attempt: 1, ...identity });
     try {
       const outcome = runSearch(envelope.payload);
       const response: SearchJobSuccess = {
@@ -170,6 +196,8 @@ export function createLocalSearchJob(envelope: SearchJobRequest): SearchTranspor
         kind: "failed",
         code: "execution-failed",
         message: error instanceof Error ? error.message : "Search execution failed",
+        attempt: 1,
+        retryable: false,
       };
       onEvent?.({ type: "failed", ...identity, response });
       return response;
@@ -180,6 +208,110 @@ export function createLocalSearchJob(envelope: SearchJobRequest): SearchTranspor
     identity,
     capabilities: LOCAL_SEARCH_TRANSPORT_CAPABILITIES,
     cancel: () => ({ acknowledged: false as const, reason: "unsupported" as const }),
+    run,
+  });
+}
+
+export const WORKER_SEARCH_TRANSPORT_CAPABILITIES: SearchTransportCapabilities = {
+  worker: true,
+  // The optimizer is currently a bounded synchronous call inside the Worker;
+  // the initial progress snapshot is transport-visible, but not live detail.
+  liveProgress: false,
+  cancellation: true,
+  resume: false,
+};
+
+interface WorkerLike {
+  onmessage: ((event: MessageEvent<SearchWorkerMessage>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  postMessage(message: SearchWorkerRequest): void;
+  terminate(): void;
+}
+
+export type SearchWorkerFactory = () => WorkerLike;
+
+/** Worker-backed transport. The default factory is only evaluated in a browser. */
+export function createWorkerSearchJob(
+  envelope: SearchJobRequest,
+  workerFactory: SearchWorkerFactory = () => new Worker(
+    new URL("./searchWorker.ts", import.meta.url),
+    { type: "module" },
+  ),
+): SearchTransportJob {
+  const identity: SearchRequestIdentity = {
+    requestId: envelope.requestId,
+    inputFingerprint: envelope.inputFingerprint,
+  };
+  let worker: WorkerLike | null = null;
+  let canceled = false;
+  let attempt = 0;
+  let pendingCancel: (() => void) | null = null;
+
+  const cancel = () => {
+    if (worker === null || canceled) return { acknowledged: false as const, reason: "not-running" as const };
+    canceled = true;
+    worker.terminate();
+    worker = null;
+    pendingCancel?.();
+    pendingCancel = null;
+    return { acknowledged: true as const, reason: "requested" as const };
+  };
+
+  const run = (onEvent?: (event: SearchTransportEvent) => void): Promise<SearchJobResponse> => {
+    attempt += 1;
+    canceled = false;
+    const currentAttempt = attempt;
+    return new Promise((resolve) => {
+      const activeWorker = workerFactory();
+      worker = activeWorker;
+      let settled = false;
+      const finish = (response: SearchJobResponse) => {
+        if (settled) return;
+        settled = true;
+        if (worker === activeWorker) worker = null;
+        pendingCancel = null;
+        resolve(response);
+      };
+      pendingCancel = () => {
+        const response: SearchJobCanceled = { ...identity, kind: "canceled", reason: "requested" };
+        onEvent?.({ type: "canceled", response, ...identity });
+        finish(response);
+      };
+      activeWorker.onmessage = (event) => {
+        const message = event.data;
+        if (message.requestId !== identity.requestId || message.inputFingerprint !== identity.inputFingerprint) return;
+        if (message.type === "started") {
+          onEvent?.({ type: "started", attempt: message.attempt, ...identity });
+        } else if (message.type === "progress") {
+          onEvent?.({ type: "progress", progress: message.progress, ...identity });
+        } else if (message.type === "completed") {
+          onEvent?.({ type: "completed", response: message.response, ...identity });
+          finish(message.response);
+        } else {
+          onEvent?.({ type: "failed", response: message.response, ...identity });
+          finish(message.response);
+        }
+      };
+      activeWorker.onerror = (event) => {
+        const response: SearchJobFailure = {
+          ...identity,
+          kind: "failed",
+          code: "execution-failed",
+          message: event.message || "Search worker failed",
+          attempt: currentAttempt,
+          retryable: true,
+        };
+        onEvent?.({ type: "failed", response, ...identity });
+        finish(response);
+      };
+      activeWorker.postMessage({ type: "search", request: envelope, attempt: currentAttempt });
+    });
+  };
+
+  return Object.freeze({
+    identity,
+    capabilities: WORKER_SEARCH_TRANSPORT_CAPABILITIES,
+    cancel,
     run,
   });
 }

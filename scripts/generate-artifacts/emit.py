@@ -127,15 +127,21 @@ def load_cache(cache: pathlib.Path) -> tuple[dict, dict, dict, dict]:
     listing = json.loads((cache / "amber" / "en" / "_list.json").read_text("utf-8"))
     set_ids = sorted(listing["data"]["items"], key=int)
     for set_id in set_ids:
-        amber_en[set_id] = json.loads(
-            (cache / "amber" / "en" / f"{set_id}.json").read_text("utf-8")
-        )["data"]
-        amber_chs[set_id] = json.loads(
-            (cache / "amber" / "chs" / f"{set_id}.json").read_text("utf-8")
-        )["data"]
-        lunaris[set_id] = json.loads(
-            (cache / "lunaris" / f"{set_id}.json").read_text("utf-8")
-        ).get("info", {})
+        try:
+            amber_en[set_id] = json.loads(
+                (cache / "amber" / "en" / f"{set_id}.json").read_text("utf-8")
+            )["data"]
+            amber_chs[set_id] = json.loads(
+                (cache / "amber" / "chs" / f"{set_id}.json").read_text("utf-8")
+            )["data"]
+            lunaris[set_id] = json.loads(
+                (cache / "lunaris" / f"{set_id}.json").read_text("utf-8")
+            ).get("info", {})
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
+            # A set is an atomic publication unit. If either locale or the
+            # verifier row is absent/corrupt, do not emit a partial identity
+            # or a number that is only backed by Amber.
+            continue
     provenance = json.loads((cache / "_provenance.json").read_text("utf-8"))
     return amber_en, amber_chs, lunaris, provenance
 
@@ -204,6 +210,16 @@ SETS_HEADER = """// ============================================================
 // ============================================================================
 
 import type { ArtifactSetDefinition } from "../types";
+
+/** Machine-readable evidence state for artifact numeric stats. */
+export const ARTIFACT_NUMERIC_STAT_PROVENANCE = Object.freeze({
+  status: "unavailable" as const,
+  primarySource: "Project Amber",
+  verifierSource: "Lunaris",
+  primaryEndpoint: "https://gi.yatta.moe/api/v2/{lang}/reliquary/{id}",
+  verifierEndpoint: "https://api.lunaris.moe/data/{version}/en/artifact/{id}.json",
+  reason: "Neither source publishes artifact main-stat or substat value tables; no numeric values are emitted.",
+});
 
 /**
  * The five slots, in the engine's `ARTIFACT_SLOTS` order.

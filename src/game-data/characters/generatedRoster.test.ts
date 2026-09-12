@@ -198,6 +198,20 @@ describe("generated roster — provenance", () => {
     }
   });
 
+  it("joins every live character to exactly one provenance row", () => {
+    expect(generatedCharacterProvenanceById.size).toBe(allCharacters.length);
+    for (const character of allCharacters) {
+      const provenance = generatedCharacterProvenanceById.get(character.id);
+      expect(provenance, character.id).toBeDefined();
+      expect(provenance!.characterId).toBe(character.id);
+      expect(provenance!.totalPerks).toBe(
+        provenance!.modelledPerks +
+          provenance!.unimplementedPerks +
+          provenance!.unverifiedPerks,
+      );
+    }
+  });
+
   it("orders the roster by sourced release date", () => {
     const dated = generatedCharacterMeta.filter(
       (meta) => meta.releaseDate !== undefined,

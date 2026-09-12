@@ -98,6 +98,16 @@ def write_json(path: pathlib.Path, payload: object) -> None:
     )
 
 
+def cached_lunaris_version(cache: pathlib.Path) -> str | None:
+    """Return the verifier version associated with this cache, if present."""
+    try:
+        payload = json.loads((cache / "_provenance.json").read_text("utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    version = payload.get("lunarisVersion") if isinstance(payload, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
 def fetch_all(cache: pathlib.Path, force: bool) -> None:
     fetched = 0
     failed: list[str] = []
@@ -135,6 +145,10 @@ def fetch_all(cache: pathlib.Path, force: bool) -> None:
     version = version_manifest["version"]
     write_json(cache / "lunaris" / "_version.json", version_manifest)
     print(f"Lunaris: game data version {version}", file=sys.stderr)
+    # A verifier detail row without its source build is unsafe evidence. The
+    # filenames are id-only, therefore a changed manifest invalidates all of
+    # them and forces a refresh before the emitter can publish any set.
+    refresh_lunaris = force or cached_lunaris_version(cache) != version
 
     lunaris_list = get_json(LUNARIS_LIST.format(version=version))
     assert isinstance(lunaris_list, dict)
@@ -144,7 +158,7 @@ def fetch_all(cache: pathlib.Path, force: bool) -> None:
     # cross-verified and must surface as a missing verifier, not be skipped.
     for set_id in set_ids:
         target = cache / "lunaris" / f"{set_id}.json"
-        if target.exists() and not force:
+        if target.exists() and not refresh_lunaris:
             continue
         try:
             write_json(

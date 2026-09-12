@@ -205,31 +205,21 @@ describe("tick horizon — the bound must actually bind", () => {
   // programmatic caller and by any future numeric input whose parse can yield
   // NaN, which is the ordinary failure mode of `parseFloat` on an empty field.
   //
-  // The assertion below states the CORRECT behaviour and therefore FAILS until
-  // the engine rejects or clamps a non-finite horizon. It is deliberately not
-  // written as `it.fails`: pinning a wrong number as expected is how a wrong
-  // number becomes permanent. See the handoff.
+  // Live regression guard: malformed horizon input must fail closed.
   // -------------------------------------------------------------------------
-  it.fails(
-    "QA-067-D: a NaN time limit must not exceed the unbounded run's damage",
-    () => {
-      const unbounded = run({ critMode: "never" }).totalDamage;
-      const nanBounded = run({
-        critMode: "never",
-        timeLimit: Number.NaN,
-      }).totalDamage;
-      expect(nanBounded).toBeLessThanOrEqual(unbounded);
-    },
-  );
-
-  it("QA-067-D reproduction: the NaN run is measurably larger (pins the bug)", () => {
-    // Pinned as an OBSERVATION so the defect cannot be closed silently: when
-    // the horizon is fixed this test fails and must be deleted alongside
-    // flipping the `it.fails` above back to `it`.
+  it("QA-067-D: a NaN time limit is fail-closed", () => {
     const unbounded = run({ critMode: "never" }).totalDamage;
+    const nanBounded = run({
+      critMode: "never",
+      timeLimit: Number.NaN,
+    }).totalDamage;
+    expect(nanBounded).toBeLessThanOrEqual(unbounded);
+  });
+
+  it("QA-067-D reproduction: NaN admits no action or tick", () => {
     const nanBounded = run({ critMode: "never", timeLimit: Number.NaN })
       .totalDamage;
-    expect(nanBounded).toBeGreaterThan(unbounded);
+    expect(nanBounded).toBe(0);
   });
 
   it("an infinite horizon behaves exactly like no horizon", () => {

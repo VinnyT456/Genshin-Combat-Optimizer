@@ -11,6 +11,7 @@ export interface RotationInsight {
   id: string;
   category: "energy" | "damage" | "reaction" | "timing";
   status: "success" | "warning" | "info";
+  evidence: "observed" | "insufficient";
   badge: string;
   title: string;
   summary: string;
@@ -38,22 +39,35 @@ export function generateRotationInsights(
   // -------------------------------------------------------------------------
   const energyStatus = activeMembers.map((char) => {
     const charSnapshot = result.finalState.characters[char.id];
-    const endEnergy = charSnapshot ? charSnapshot.energy.current : 0;
+    const endEnergy = charSnapshot?.energy.current;
     const maxEnergy = char.maxEnergy;
-    const isReady = endEnergy >= maxEnergy - 1e-3;
-    const deficit = Math.max(0, maxEnergy - endEnergy);
-    const pct = Math.min(1, endEnergy / (maxEnergy || 1));
-    return { char, endEnergy, maxEnergy, isReady, deficit, pct };
+    const isReady = endEnergy !== undefined && endEnergy >= maxEnergy - 1e-3;
+    const deficit = endEnergy === undefined ? undefined : Math.max(0, maxEnergy - endEnergy);
+    return { char, endEnergy, maxEnergy, isReady, deficit };
   });
 
   const readyCount = energyStatus.filter((s) => s.isReady).length;
   const unready = energyStatus.filter((s) => !s.isReady);
+  const energyUnknown = energyStatus.filter((s) => s.endEnergy === undefined);
 
-  if (unready.length === 0) {
+  if (energyUnknown.length > 0) {
+    const names = energyUnknown.map((s) => charNameZh(s.char.name)).join("、");
+    insights.push({
+      id: "energy-loop-unknown",
+      category: "energy",
+      status: "info",
+      evidence: "insufficient",
+      badge: "能量证据不足",
+      title: "无法确认全队末尾能量",
+      summary: `缺少 ${names} 的末尾能量快照。`,
+      detail: "当前结果没有发布完整的角色能量状态；不能据此判断充能缺口或循环可重复性。",
+    });
+  } else if (unready.length === 0) {
     insights.push({
       id: "energy-loop-success",
       category: "energy",
       status: "success",
+      evidence: "observed",
       badge: "末尾能量",
       title: `全队循环末尾能量已满 (${readyCount}/${activeMembers.length})`,
       summary: "所有出战角色在观测结束时均已积攒满元素能量。",
@@ -61,12 +75,13 @@ export function generateRotationInsights(
     });
   } else {
     const names = unready
-      .map((u) => `${charNameZh(u.char.name)} (尚缺 ${fmtNum(u.deficit)} 能量)`)
+      .map((u) => `${charNameZh(u.char.name)} (尚缺 ${fmtNum(u.deficit ?? 0)} 能量)`)
       .join("、");
     insights.push({
       id: "energy-loop-warning",
       category: "energy",
       status: "warning",
+      evidence: "observed",
       badge: "末尾能量",
       title: `${readyCount}/${activeMembers.length} 角色末尾能量就绪 · 存在充能缺口`,
       summary: `未就绪角色：${names}。`,
@@ -116,6 +131,7 @@ export function generateRotationInsights(
       id: "damage-mvp",
       category: "damage",
       status: "info",
+      evidence: "observed",
       badge: "输出核心",
       title: `${mvpName} 贡献全队 ${fmtPercent(topDmgPct)} 输出`,
       summary: `${mvpName} 累计造成 ${fmtNum(maxCharDmg)} 伤害，为本循环绝对主力输出手。`,
@@ -144,10 +160,22 @@ export function generateRotationInsights(
       id: "reaction-synergy",
       category: "reaction",
       status: "success",
+      evidence: "observed",
       badge: "反应记录",
       title: `已记录反应事件占伤害判定 ${fmtPercent(reactionRate)}`,
       summary: `全轴 ${totalHits} 次伤害判定中，记录 ${reactionCount} 次可识别的反应伤害事件。`,
       detail: "该统计只覆盖引擎已发出的反应伤害事件，不代表完整的元素附着或反应覆盖情况。",
+    });
+  } else {
+    insights.push({
+      id: "reaction-synergy-unknown",
+      category: "reaction",
+      status: "info",
+      evidence: "insufficient",
+      badge: "反应证据不足",
+      title: "未记录可识别的反应伤害事件",
+      summary: `已发出 ${totalHits} 次伤害判定，但没有反应伤害事件可供统计。`,
+      detail: "这只能说明当前输出没有反应事件记录；不能证明没有元素附着或反应发生。",
     });
   }
 
@@ -165,6 +193,7 @@ export function generateRotationInsights(
       id: "rotation-tempo",
       category: "timing",
       status: "info",
+      evidence: "observed",
       badge: "时序节奏",
       title: `循环轴长 ${result.duration.toFixed(2)} 秒 · ${swapCount} 次切人`,
       summary: `切人衔接总耗时 ${totalSwapTime.toFixed(2)} 秒 (占比 ${fmtPercent(swapTimeRatio)})。`,

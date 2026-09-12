@@ -376,6 +376,22 @@ export function actionTypeZh(t: string): string {
   return ACTION_TYPE_ZH[t.toLowerCase()] ?? "未知动作";
 }
 
+/** Chinese labels for machine-readable validation codes; never expose source prose. */
+export const VALIDATION_REASON_ZH: Record<string, string> = {
+  "unknown-character": "队伍中找不到该角色。",
+  "unknown-ability": "找不到该技能。",
+  "on-cooldown": "技能仍在冷却中。",
+  "insufficient-energy": "元素爆发能量不足。",
+  "redundant-swap": "该角色已经在场上。",
+  "past-time-limit": "动作超出时间窗口。",
+  "mismatched-ability": "动作与技能不匹配。",
+  "invalid-config": "模拟配置无效。",
+};
+
+export function validationReasonZh(code: string): string {
+  return VALIDATION_REASON_ZH[code] ?? "未知验证原因。";
+}
+
 export const REACTION_ZH: Record<string, string> = {
   vaporize: "蒸发",
   melt: "融化",

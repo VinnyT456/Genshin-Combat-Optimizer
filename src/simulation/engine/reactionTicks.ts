@@ -97,13 +97,9 @@ import type { AuraElement } from "@/simulation/reactions/types";
 //    and `lastTickTime`. Tick series state is therefore reconstructible, and a
 //    resumed run rebuilds the same schedule from the same auras.
 //
-//    KNOWN LIMIT, stated rather than hidden: `lastTickTime` is live queue state
-//    and is NOT yet a snapshot field, so a run resumed mid-EC restarts its tick
-//    phase from the resume point instead of continuing the original cadence.
-//    The aura gauges — which decide how many ticks remain — do survive exactly.
-//    Carrying the tick phase needs a new `SimulationSnapshot` field and so a
-//    reviewed public-type change; it is called out in the handoff, not guessed
-//    at here.
+//    `lastTickTime` and `nextTickTime` are queue state, and both are carried by
+//    `ReactionTickQueueSnapshot`. A resumed run therefore continues the exact
+//    cadence and does not restart the series at the checkpoint clock.
 //
 // ---------------------------------------------------------------------------
 // WHY NO `withDrain` IS ATTACHED FOR EC — a deliberate modelling decision

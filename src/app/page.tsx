@@ -47,12 +47,16 @@ import { resolveDashboardState } from "@/features/simulation/dashboardState";
 import { RotationSearchPanel } from "@/features/optimizer/RotationSearchPanel";
 import {
   DEFAULT_SEARCH_DURATION_SECONDS,
-  runSearch,
   scoreForObjective,
   type OptimizationObjective,
   type SearchBudget,
   type SearchOutcome,
 } from "@/features/optimizer/optimizerAdapter";
+import {
+  createSearchJobRequest,
+  createWorkerSearchJob,
+  type SearchTransportJob,
+} from "@/features/optimizer/searchTransport";
 import type { SearchPhase } from "@/features/optimizer/searchPresentation";
 import { requestFingerprint } from "@/features/optimizer/searchState";
 import {
@@ -217,6 +221,7 @@ export default function Home() {
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [searchRequestFingerprint, setSearchRequestFingerprint] = useState<string | null>(null);
   const searchRunIdRef = useRef(0);
+  const searchJobRef = useRef<SearchTransportJob | null>(null);
   const [adoption, setAdoption] = useState<AdoptionState>(NO_ADOPTION);
   const [selectedEventIndex, setSelectedEventIndex] = useState<number | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
@@ -471,29 +476,33 @@ export default function Home() {
       `当前阵容与配置 · ${enemyNameZh(enemy.name)} · ${searchObjective === "dps" ? "秒伤 (DPS)" : "总伤害"} · ${searchDuration}秒 · ${searchBudget === "fast" ? "快速" : searchBudget === "thorough" ? "深入" : "均衡"}`,
     );
     setSelectedCandidateId(null);
-    setSearchPhase("searching");
-    // The search is synchronous and blocks the main thread. Yielding first lets
-    // the "searching" state paint, so the UI is never silently frozen with a
-    // stale label. When the search moves into a worker this becomes the
-    // message boundary rather than a timeout, with no change to the UI shape.
-    window.setTimeout(() => {
-      if (runId !== searchRunIdRef.current) return;
-      const outcome = runSearch({
+    setSearchPhase("queued");
+    const job = createWorkerSearchJob(createSearchJobRequest(`search-${runId}`, {
         team: teamMembers,
         enemy,
         budget: searchBudget,
         objective: searchObjective,
         durationSeconds: searchDuration,
         config: simConfig,
-      });
-      setSearchOutcome(outcome);
-      setSearchPhase(outcome.candidates.length > 0 ? "results" : "empty");
-      setAnnouncement(
-        outcome.candidates.length > 0
-          ? `循环搜索完成，找到 ${outcome.candidates.length} 个候选循环。`
-          : "循环搜索完成，未找到候选循环。",
-      );
-    }, 0);
+      }))
+    searchJobRef.current = job;
+    void job.run((event) => {
+      if (runId === searchRunIdRef.current && event.type === "started") setSearchPhase("searching");
+    }).then((response) => {
+      if (runId !== searchRunIdRef.current) return;
+      searchJobRef.current = null;
+      if (response.kind === "canceled") {
+        setSearchPhase("canceled");
+        setAnnouncement("搜索已取消。当前配置和已有结果均已保留。");
+      } else if (response.kind === "failed") {
+        setSearchPhase("failed");
+        setAnnouncement("搜索未完成。");
+      } else {
+        setSearchOutcome(response.outcome);
+        setSearchPhase(response.outcome.candidates.length > 0 ? "results" : "empty");
+        setAnnouncement(response.outcome.candidates.length > 0 ? `循环搜索完成，找到 ${response.outcome.candidates.length} 个候选循环。` : "循环搜索完成，未找到候选循环。");
+      }
+    });
   }, [
     searchBlockedReason,
     teamMembers,
@@ -504,6 +513,12 @@ export default function Home() {
     simConfig,
     liveSearchFingerprint,
   ]);
+
+  const handleCancelSearch = useCallback(() => {
+    if (searchJobRef.current === null) return;
+    setSearchPhase("canceling");
+    searchJobRef.current.cancel();
+  }, []);
 
   const handleSelectCandidate = useCallback((candidateId: string) => {
     setSelectedCandidateId((current) => current === candidateId ? null : candidateId);
@@ -741,6 +756,7 @@ export default function Home() {
               onObjectiveChange={setSearchObjective}
               onDurationChange={setSearchDuration}
               onSearch={handleSearch}
+              onCancel={handleCancelSearch}
               onAdopt={handleAdopt}
               onSelectCandidate={handleSelectCandidate}
               onRestore={handleRestoreIncumbent}

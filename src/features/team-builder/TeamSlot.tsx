@@ -10,7 +10,13 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { elementSurfaceClass } from "@/lib/elementSurface";
 import { DetailDisclosure } from "@/components/ui/DetailDisclosure";
 import { CharacterAvatar } from "@/components/ui/CharacterAvatar";
-import { CARD, FOCUS_RING, TRANSITION_COLORS } from "@/components/ui/tokens";
+import {
+  CARD,
+  FOCUS_RING,
+  STATE_GLYPH,
+  STATE_TEXT,
+  TRANSITION_COLORS,
+} from "@/components/ui/tokens";
 import { fmtNum, fmtPercent } from "@/lib/format";
 import {
   formatSupportTier,
@@ -79,6 +85,18 @@ interface FilledProps {
   artifactStatCount?: number;
   /** Effective initial panel, including selected gear and permanent effects. */
   displayStats?: Stats;
+  /**
+   * True when the equipped weapon + set match this character's KQM base build,
+   * so the slot can surface that the gear is the recommended base build rather
+   * than a user choice.
+   */
+  isRecommendedBuild?: boolean;
+  /**
+   * Honesty marker for a recommended-build main stat the engine cannot model
+   * (e.g. Bennett's Healing Bonus% circlet). Present only when the build
+   * carries such a note; rendered inline beside the gear, never hidden.
+   */
+  circletNote?: string;
 }
 
 const ACTIVE_FOLLOWS_TIMELINE_HELP =
@@ -109,6 +127,8 @@ export function FilledTeamSlot({
   artifactCombination,
   artifactStatCount,
   displayStats,
+  isRecommendedBuild = false,
+  circletNote,
 }: FilledProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -416,6 +436,11 @@ export function FilledTeamSlot({
                   已录入 {artifactStatCount}/5 件属性
                 </span>
               )}
+              {isRecommendedBuild && (
+                <span className="mt-1 ml-1 inline-block rounded-sm border border-surface-border px-1.5 py-0.5 text-micro font-medium text-slate-400">
+                  符合 KQM 基准
+                </span>
+              )}
             </div>
           </button>
         ) : (
@@ -427,6 +452,17 @@ export function FilledTeamSlot({
           >
             <span>+ 装备圣遗物</span>
           </button>
+        )}
+
+        {/* Honesty marker: a recommended-build main stat the engine cannot
+            model (e.g. Bennett's Healing Bonus% circlet). Reuses the info
+            (`◇`) honesty surface — colour is never the sole signal, the note
+            text carries the meaning, and it is shown inline, never hidden. */}
+        {circletNote && (
+          <p className={cn("flex items-start gap-1 text-micro", STATE_TEXT.info)}>
+            <span aria-hidden="true">{STATE_GLYPH.info}</span>
+            <span>头冠：{circletNote}</span>
+          </p>
         )}
 
         {/* Two-row scan keeps labels and values readable on narrow cards. */}

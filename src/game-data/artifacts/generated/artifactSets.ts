@@ -31,6 +31,16 @@
 
 import type { ArtifactSetDefinition } from "../types";
 
+/** Machine-readable evidence state for artifact numeric stats. */
+export const ARTIFACT_NUMERIC_STAT_PROVENANCE = Object.freeze({
+  status: "unavailable" as const,
+  primarySource: "Project Amber",
+  verifierSource: "Lunaris",
+  primaryEndpoint: "https://gi.yatta.moe/api/v2/{lang}/reliquary/{id}",
+  verifierEndpoint: "https://api.lunaris.moe/data/{version}/en/artifact/{id}.json",
+  reason: "Neither source publishes artifact main-stat or substat value tables; no numeric values are emitted.",
+});
+
 /**
  * The five slots, in the engine's `ARTIFACT_SLOTS` order.
  *

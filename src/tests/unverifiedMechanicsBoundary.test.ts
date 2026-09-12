@@ -251,13 +251,17 @@ describe("UNVERIFIED absence: unmodelled mechanics produce NOTHING, not a guess"
     expect(mods.amplifyingMultiplier).toBe(1);
     expect(mods.additiveBaseDamageBonus).toBe(0);
     expect(mods.transformative).toEqual([]);
-    // There is no shield channel at all — the returned shape has exactly
-    // three keys. A fourth appearing means the shape changed.
+    // Reaction metadata is allowed to describe the aura element and reaction
+    // kind. It must not become a damage or shield effect.
     expect(Object.keys(mods).sort()).toEqual([
       "additiveBaseDamageBonus",
       "amplifyingMultiplier",
+      "crystallizeElements",
+      "reactionKinds",
       "transformative",
     ]);
+    expect(mods.crystallizeElements).toEqual(["pyro"]);
+    expect(mods.reactionKinds).toEqual(["crystallize"]);
   });
 
   it("UNVERIFIED `electro-charged-ticks`: EC is a SINGLE instance, not a schedule", () => {

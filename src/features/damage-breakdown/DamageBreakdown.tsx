@@ -7,6 +7,7 @@ import {
   composeRowText,
   type BreakdownTableModel,
 } from "./breakdownModel";
+import { EvidenceSummary } from "./EvidenceSummary";
 
 interface Props {
   result: SimulationResult;
@@ -94,6 +95,7 @@ export function DamageBreakdown({ result, team }: Props) {
       {tables.map((table) => (
         <BreakdownTable key={table.title} table={table} />
       ))}
+      <EvidenceSummary result={result} />
     </div>
   );
 }

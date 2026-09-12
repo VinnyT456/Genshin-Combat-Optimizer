@@ -1,6 +1,16 @@
 // ============================================================================
-// D1 — BUILD SEARCH: DESIGN ONLY. NOTHING HERE IS IMPLEMENTED OR EXPORTED AS
-// AN ALGORITHM.
+// D1 — HISTORICAL BUILD-SEARCH DESIGN SNAPSHOT. NOTHING HERE IS IMPLEMENTED OR
+// EXPORTED AS AN ALGORITHM.
+//
+// The current implementation plan is:
+// docs/planning/OPTIMAL-SEARCH-AND-FEATURE-ROADMAP.md
+//
+// That plan supersedes two assumptions below: equipment can now affect legality
+// through cooldown, resources, HP thresholds, triggers and action availability,
+// not only ER; and exact search needs complete executable-effect identity rather
+// than a resolved stat bag plus set keys. The analysis below remains useful
+// historical rationale for alternating search, but is not an implementation
+// contract.
 //
 // This file states, in compilable form, what a build-optimisation pass would
 // require. It follows the precedent set by `CONTRACT.ts`: write the

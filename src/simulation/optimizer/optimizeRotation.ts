@@ -13,7 +13,10 @@ import type {
   OptimizationObjective,
   OptimizationResult,
   OptimizerConfig,
+  OptimizerConstraints,
+  RankedRotation,
 } from "./CONTRACT";
+import { createReplayInputFingerprint, rotationFingerprint } from "./replayCertificate";
 import { generateCandidateActions } from "./actionGenerator";
 import { stateKey } from "./stateKey";
 import { admitCandidate, hasSkippedActions } from "./candidateAdmission";
@@ -169,6 +172,24 @@ function nodeKey(node: SearchNode): string {
   return node.rotationKeyCache ?? rotationKey(node.rotation);
 }
 
+function countSwaps(rotation: Rotation): number {
+  return rotation.reduce((count, action) => count + (action.actionType === "swap" ? 1 : 0), 0);
+}
+
+function allowsAction(action: RotationAction, constraints: OptimizerConstraints): boolean {
+  if (constraints.allowedActionTypes && !constraints.allowedActionTypes.includes(action.actionType)) return false;
+  if (constraints.excludedActionTypes?.includes(action.actionType)) return false;
+  return true;
+}
+
+function meetsEnergyFloors(result: SimulationResult, constraints: OptimizerConstraints): boolean {
+  if (!constraints.minEnergyByCharacter) return true;
+  return Object.entries(constraints.minEnergyByCharacter).every(([id, minimum]) => {
+    const current = result.finalState.characters[id]?.energy.current;
+    return current === undefined || current >= minimum - EPSILON;
+  });
+}
+
 /**
  * Deterministic node comparator. Exported for direct total-order testing:
  * in-process reruns cannot detect a missing tie-break (V8's sort is stable),
@@ -228,6 +249,21 @@ export function optimizeRotation(
     simulationDuration: config.simulationDuration,
     maxDepth,
   } as const;
+  const constraints = config.constraints ?? {};
+  const inputFingerprint = createReplayInputFingerprint(team, enemy, {
+    beamWidth, topN, simulationDuration: config.simulationDuration,
+    objective: config.objective, constraints,
+  });
+  const certificate = (ranked: readonly RankedRotation[], stopReason: "completed" | "budget-exhausted" | "no-candidates", verifiedColdReplay: boolean) => ({
+    version: 1 as const,
+    inputFingerprint,
+    effectiveConditions: constraints,
+    budget,
+    objective: config.objective,
+    stopReason,
+    candidateFingerprints: ranked.map((candidate) => rotationFingerprint(candidate.rotation, candidate.score, candidate.result.totalDamage)),
+    verifiedColdReplay,
+  });
 
   if (team.length === 0 || config.simulationDuration <= 0) {
     return {
@@ -237,6 +273,7 @@ export function optimizeRotation(
       budget,
       depthReached: 0,
       stopReason: "no-candidates",
+      replayCertificate: certificate([], "no-candidates", true),
     };
   }
 
@@ -249,19 +286,38 @@ export function optimizeRotation(
   };
 
   let nodesExpanded = 0;
-  const rootResult = simulateRotation(team, [], enemy, effectiveSimConfig);
+  const fixedPrefix = constraints.fixedPrefix ?? [];
+  const rootResult = simulateRotation(team, fixedPrefix, enemy, effectiveSimConfig);
+  if (
+    rootResult.errors.length > 0 || hasSkippedActions(rootResult) ||
+    fixedPrefix.some((action) => !allowsAction(action, constraints)) ||
+    (constraints.maxActions !== undefined && fixedPrefix.length > constraints.maxActions) ||
+    (constraints.maxSwaps !== undefined && countSwaps(fixedPrefix) > constraints.maxSwaps) ||
+    !meetsEnergyFloors(rootResult, constraints)
+  ) {
+    return {
+      ranked: [], nodesExpanded: 0, objective: config.objective, budget,
+      depthReached: 0, stopReason: "no-candidates",
+      replayCertificate: certificate([], "no-candidates", false),
+    };
+  }
   const rootScore = computeScore(rootResult, config.objective);
   const rootNode: SearchNode = {
-    rotation: [],
+    rotation: fixedPrefix,
     result: rootResult,
     score: rootScore,
     totalDamage: rootResult.totalDamage,
     endTime: rootResult.finalState.time,
-    rotationKeyCache: "",
+    rotationKeyCache: rotationKey(fixedPrefix),
   };
 
   const completedNodes: SearchNode[] = [];
   let currentBeam: SearchNode[] = [rootNode];
+  const completedAtPrefix = rootNode.rotation.length > 0 && rootNode.endTime >= config.simulationDuration - EPSILON;
+  if (completedAtPrefix) {
+    completedNodes.push(rootNode);
+    currentBeam = [];
+  }
 
   const maxSteps = maxDepth;
   let step = 0;
@@ -274,6 +330,10 @@ export function optimizeRotation(
     const nextCandidates: SearchNode[] = [];
 
     for (const node of currentBeam) {
+      if (constraints.maxActions !== undefined && node.rotation.length >= constraints.maxActions) {
+        if (node.rotation.length > 0) completedNodes.push(node);
+        continue;
+      }
       const lastAction = node.rotation[node.rotation.length - 1];
       const validActions = generateCandidateActions(
         team,
@@ -297,6 +357,8 @@ export function optimizeRotation(
       };
 
       for (const action of validActions) {
+        if (!allowsAction(action, constraints)) continue;
+        if (constraints.maxSwaps !== undefined && countSwaps(node.rotation) + (action.actionType === "swap" ? 1 : 0) > constraints.maxSwaps) continue;
         const suffix: Rotation = [action];
         const result = simulateRotation(team, suffix, enemy, resumeConfig);
         nodesExpanded++;
@@ -310,6 +372,7 @@ export function optimizeRotation(
         if (admitted === undefined) {
           continue;
         }
+        if (!meetsEnergyFloors(result, constraints)) continue;
 
         const candidateRotation = [...node.rotation, action];
         const candidateKey = nodeKey(node) + actionKeySegment(action);
@@ -453,6 +516,10 @@ export function optimizeRotation(
     objective: config.objective,
     budget,
     depthReached: step,
-    stopReason,
+      stopReason,
+    replayCertificate: certificate(ranked.map(({ node }) => ({
+      candidateId: nodeKey(node), rotation: node.rotation, result: node.result,
+      score: node.score, rank: 0, tieBreakKey: nodeKey(node),
+    })), stopReason, true),
   };
 }

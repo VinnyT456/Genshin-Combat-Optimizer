@@ -227,6 +227,34 @@ describe("optimizeRotation", () => {
 
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
+
+  it("enforces fixed prefixes and action/swap bounds", () => {
+    const prefix = [{ characterId: testPyro.id, actionType: "skill" as const }];
+    const result = optimizeRotation([testPyro, testHydro], testEnemy, {
+      beamWidth: 4, simulationDuration: 5, objective: "total-damage", topN: 3,
+      constraints: { fixedPrefix: prefix, allowedActionTypes: ["skill", "swap"], maxActions: 3, maxSwaps: 1 },
+    });
+    expect(result.ranked.length).toBeGreaterThan(0);
+    for (const candidate of result.ranked) {
+      expect(candidate.rotation.slice(0, prefix.length)).toEqual(prefix);
+      expect(candidate.rotation.length).toBeLessThanOrEqual(3);
+      expect(candidate.rotation.filter((action) => action.actionType === "swap")).toHaveLength(1);
+      expect(candidate.rotation.every((action) => ["skill", "swap"].includes(action.actionType))).toBe(true);
+    }
+    expect(result.replayCertificate.verifiedColdReplay).toBe(true);
+    expect(result.replayCertificate.effectiveConditions.maxActions).toBe(3);
+    expect(result.replayCertificate.candidateFingerprints).toHaveLength(result.ranked.length);
+  });
+
+  it("rejects an invalid fixed prefix instead of emitting an illegal candidate", () => {
+    const result = optimizeRotation([testPyro], testEnemy, {
+      beamWidth: 4, simulationDuration: 5, objective: "total-damage", topN: 3,
+      constraints: { fixedPrefix: [{ characterId: "missing", actionType: "skill" }] },
+    });
+    expect(result.ranked).toEqual([]);
+    expect(result.stopReason).toBe("no-candidates");
+    expect(result.replayCertificate.verifiedColdReplay).toBe(false);
+  });
   // -----------------------------------------------------------------------
   // THE END-TO-END HONESTY CHECK (added TASK #054, Phase D3).
   //

@@ -78,7 +78,24 @@ describe("generateRotationInsights", () => {
     const result = simulateRotation([testPyro], rotation, testEnemy, { critMode: "expected" });
     const insights = generateRotationInsights(result, [testPyro]);
 
-    expect(insights.some((insight) => insight.id === "reaction-synergy-none")).toBe(false);
-    expect(insights.map((insight) => insight.detail).join(" ")).not.toContain("纯色");
+    const reactionInsight = insights.find((insight) => insight.category === "reaction");
+    expect(reactionInsight?.id).toBe("reaction-synergy-unknown");
+    expect(reactionInsight?.evidence).toBe("insufficient");
+    expect(reactionInsight?.detail).toContain("不能证明");
+  });
+
+  it("does not turn a missing final energy snapshot into a deficit", () => {
+    const rotation: Rotation = [{ characterId: "test-pyro", actionType: "skill" }];
+    const result = simulateRotation([testPyro], rotation, testEnemy, { critMode: "expected" });
+    const incomplete = {
+      ...result,
+      finalState: { ...result.finalState, characters: {} },
+    } as SimulationResult;
+    const energyInsight = generateRotationInsights(incomplete, [testPyro]).find(
+      (insight) => insight.category === "energy",
+    );
+    expect(energyInsight?.id).toBe("energy-loop-unknown");
+    expect(energyInsight?.evidence).toBe("insufficient");
+    expect(energyInsight?.detail).not.toContain("尚缺 0");
   });
 });

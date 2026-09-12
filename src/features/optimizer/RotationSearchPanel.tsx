@@ -56,6 +56,7 @@ export interface RotationSearchPanelProps {
   readonly onObjectiveChange: (objective: OptimizationObjective) => void;
   readonly onDurationChange: (seconds: number) => void;
   readonly onSearch: () => void;
+  readonly onCancel?: () => void;
   readonly onAdopt: (rotation: Rotation, rank: number) => void;
   readonly onSelectCandidate?: (candidateId: string) => void;
   readonly onRestore: () => void;
@@ -87,13 +88,14 @@ export function RotationSearchPanel({
   onObjectiveChange,
   onDurationChange,
   onSearch,
+  onCancel,
   onAdopt,
   onSelectCandidate,
   onRestore,
 }: RotationSearchPanelProps) {
   const durationId = useId();
   const nameById = new Map(team.map((c) => [c.id, charNameZh(c.name)]));
-  const searching = phase === "searching";
+  const searching = phase === "queued" || phase === "searching" || phase === "canceling";
   const durationInvalid =
     !Number.isFinite(durationSeconds) ||
     durationSeconds < MIN_SEARCH_DURATION_SECONDS ||
@@ -171,10 +173,10 @@ export function RotationSearchPanel({
           <Button
             variant="primary"
             size="md"
-            onClick={onSearch}
-            disabled={searching || blockedReason !== null || durationInvalid}
+            onClick={phase === "queued" || phase === "searching" ? onCancel : onSearch}
+            disabled={phase === "canceling" || (phase !== "queued" && phase !== "searching" && (blockedReason !== null || durationInvalid))}
           >
-            {searching ? "搜索执行中…" : "开始搜索"}
+            {phase === "canceling" ? "正在取消…" : phase === "queued" || phase === "searching" ? "取消搜索" : phase === "failed" ? "重试相同条件" : "开始搜索"}
           </Button>
 
           {blockedReason !== null && (
@@ -197,7 +199,7 @@ export function RotationSearchPanel({
 
       <div className={cn(CARD, "space-y-3 p-4")} role="region" aria-labelledby={`${durationId}-status-heading`} aria-busy={searching}>
         <h3 id={`${durationId}-status-heading`} className="text-sm font-semibold text-slate-200">搜索状态</h3>
-        {searching ? <p className="text-sm text-slate-300">{SEARCHING_NOTICE}</p> : <p className="text-sm text-slate-400">搜索尚未运行。</p>}
+        {phase === "queued" ? <p className="text-sm text-slate-300">正在准备搜索…</p> : phase === "searching" ? <p className="text-sm text-slate-300">{SEARCHING_NOTICE}</p> : phase === "canceling" ? <p className="text-sm text-slate-300">正在取消…</p> : phase === "canceled" ? <p className="text-sm text-slate-300">搜索已取消。当前配置和已有结果均已保留。</p> : phase === "failed" ? <p className="text-sm text-slate-300">搜索未完成。</p> : <p className="text-sm text-slate-400">搜索尚未运行。</p>}
         {searching && <p className="text-xs text-slate-500">{SEARCH_UNSUPPORTED_NOTICE}</p>}
         {draftChanged && <p className="rounded-md border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-200">当前配置已更改。本次搜索仍使用开始时的配置；结果完成后不会自动应用。</p>}
       </div>
@@ -308,6 +310,7 @@ export function RotationSearchPanel({
                         variant="secondary"
                         onClick={() => onSelectCandidate?.(candidate.candidateId)}
                         aria-expanded={selectedCandidateId === candidate.candidateId}
+                        aria-controls={`candidate-${candidate.candidateId}-details`}
                       >
                         {selectedCandidateId === candidate.candidateId ? "收起候选" : "查看候选"}
                       </Button>

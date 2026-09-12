@@ -13,6 +13,7 @@
 // ============================================================================
 
 import type {
+  ActionType,
   Rotation,
   SimulationResult,
   SimulationSnapshot,
@@ -48,6 +49,36 @@ export interface OptimizerConfig {
   objective: OptimizationObjective;
   /** Number of ranked rotations returned. */
   topN: number;
+  constraints?: OptimizerConstraints;
+}
+
+export interface OptimizerConstraints {
+  readonly fixedPrefix?: Rotation;
+  readonly allowedActionTypes?: readonly ActionType[];
+  readonly excludedActionTypes?: readonly ActionType[];
+  readonly maxActions?: number;
+  readonly maxSwaps?: number;
+  /** Minimum energy after each accepted action, keyed by character id. */
+  readonly minEnergyByCharacter?: Readonly<Record<string, number>>;
+}
+
+/** Measured work presets; these are not quality or optimality guarantees. */
+export type OptimizerBudgetPreset = "fast" | "balanced" | "thorough";
+export const MEASURED_SEARCH_PRESETS: Readonly<Record<OptimizerBudgetPreset, OptimizationBudget>> = {
+  fast: { beamWidth: 4, topN: 5, simulationDuration: 20, maxDepth: 400 },
+  balanced: { beamWidth: 12, topN: 5, simulationDuration: 20, maxDepth: 400 },
+  thorough: { beamWidth: 32, topN: 5, simulationDuration: 20, maxDepth: 400 },
+};
+
+export interface ReplayCertificate {
+  readonly version: 1;
+  readonly inputFingerprint: string;
+  readonly effectiveConditions: OptimizerConstraints;
+  readonly budget: OptimizationBudget;
+  readonly objective: OptimizationObjective;
+  readonly stopReason: OptimizationStopReason;
+  readonly candidateFingerprints: readonly string[];
+  readonly verifiedColdReplay: boolean;
 }
 
 export interface RankedRotation {
@@ -76,6 +107,7 @@ export interface OptimizationResult {
   depthReached: number;
   /** Explicit reason the bounded search stopped. */
   stopReason: OptimizationStopReason;
+  readonly replayCertificate: ReplayCertificate;
 }
 
 // ---------------------------------------------------------------------------

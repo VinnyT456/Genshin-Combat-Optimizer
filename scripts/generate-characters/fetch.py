@@ -77,6 +77,16 @@ def write_json(path: pathlib.Path, payload: object) -> None:
     )
 
 
+def cached_lunaris_version(cache: pathlib.Path) -> str | None:
+    """Return the verifier version associated with this cache, if present."""
+    try:
+        payload = json.loads((cache / "_provenance.json").read_text("utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    version = payload.get("lunarisVersion") if isinstance(payload, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
 def fetch_all(cache: pathlib.Path, force: bool) -> None:
     fetched = 0
     failed: list[str] = []
@@ -109,6 +119,12 @@ def fetch_all(cache: pathlib.Path, force: bool) -> None:
     write_json(cache / "lunaris" / "_version.json", version_manifest)
     print(f"Lunaris: game data version {version}", file=sys.stderr)
 
+    # Detail rows are keyed only by source id on disk, so the manifest is the
+    # cache namespace. If the build changed, every verifier row must be
+    # refreshed before emission; stale evidence is indistinguishable from
+    # current evidence once parsed.
+    refresh_lunaris = force or cached_lunaris_version(cache) != version
+
     lunaris_list = get_json(LUNARIS_LIST.format(version=version))
     assert isinstance(lunaris_list, dict)
     write_json(cache / "lunaris" / "_list.json", lunaris_list)
@@ -119,7 +135,7 @@ def fetch_all(cache: pathlib.Path, force: bool) -> None:
     # parse time by `parse.lunaris_id_for`.
     for char_id in sorted(lunaris_list):
         target = cache / "lunaris" / f"{char_id}.json"
-        if target.exists() and not force:
+        if target.exists() and not refresh_lunaris:
             continue
         try:
             write_json(

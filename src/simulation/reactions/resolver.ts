@@ -126,6 +126,8 @@ export interface ReactionModifiers {
    * These do NOT interact with the triggering instance's stats.
    */
   transformative: readonly TransformativeInstance[];
+  /** Element carried by each Crystallize reaction, in reaction order. */
+  crystallizeElements?: readonly Element[];
   /** Reaction kinds produced by this hit, including non-damaging reactions. */
   reactionKinds?: readonly string[];
 }
@@ -176,16 +178,26 @@ export function toReactionModifiers(
   let amplifying = 1;
   let additive = 0;
   const transformative: TransformativeInstance[] = [];
+  const crystallizeElements: Element[] = [];
   const reactionKinds: string[] = [];
 
   for (const reaction of reactions) {
     // Pure aura-state reactions remain neutral to the legacy modifier shape.
     // Damage-bearing and reaction-triggering effects are surfaced for the
     // engine's artifact lifecycle seam.
-    if (reaction.category !== "none" || reaction.kind === "quicken") {
+    if (
+      reaction.category !== "none" ||
+      reaction.kind === "quicken" ||
+      (reaction.kind === "crystallize" && reaction.auraElement !== undefined)
+    ) {
       reactionKinds.push(reaction.kind);
     }
     const bonus = stats.reactionBonus?.[reaction.kind] ?? 0;
+
+    if (reaction.kind === "crystallize" && reaction.auraElement !== undefined) {
+      crystallizeElements.push(reaction.auraElement);
+      continue;
+    }
 
     if (reaction.category === "amplifying" && reaction.direction) {
       amplifying *= amplifyingMultiplier(
@@ -230,6 +242,7 @@ export function toReactionModifiers(
     amplifyingMultiplier: amplifying,
     additiveBaseDamageBonus: additive,
     transformative,
+    ...(crystallizeElements.length > 0 ? { crystallizeElements } : {}),
     reactionKinds,
   };
 }

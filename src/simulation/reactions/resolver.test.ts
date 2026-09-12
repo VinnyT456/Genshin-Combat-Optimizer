@@ -257,6 +257,24 @@ describe("toReactionModifiers — pipeline channel separation", () => {
     expect(mods).toEqual(NO_REACTION_MODIFIERS);
   });
 
+  it("exposes crystallized aura element for event-driven set effects", () => {
+    const mods = toReactionModifiers(
+      [
+        {
+          kind: "crystallize",
+          category: "none",
+          triggerElement: "geo",
+          auraElement: "hydro",
+          gaugeConsumed: 0.5,
+        },
+      ],
+      stats,
+      noRes,
+    );
+    expect(mods.crystallizeElements).toEqual(["hydro"]);
+    expect(mods.transformative).toHaveLength(0);
+  });
+
   it("applies per-reaction DMG bonuses additively with the EM bonus", () => {
     const mods = toReactionModifiers(
       [

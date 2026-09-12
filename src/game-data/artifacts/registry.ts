@@ -1,5 +1,8 @@
 import type { ArtifactSetDefinition } from "./types";
-import { generatedArtifactSets } from "./generated/artifactSets";
+import {
+  generatedArtifactSets,
+  ARTIFACT_NUMERIC_STAT_PROVENANCE,
+} from "./generated/artifactSets";
 import { generatedArtifactEffects } from "./generated/setEffects";
 import type { GeneratedArtifactEffect } from "./generated/setEffects";
 
@@ -14,6 +17,9 @@ import type { GeneratedArtifactEffect } from "./generated/setEffects";
  * `scripts/generate-artifacts` and must never be hand-edited.
  */
 export const allArtifacts: readonly ArtifactSetDefinition[] = generatedArtifactSets;
+
+/** Numeric artifact stats are intentionally absent from the generated source. */
+export { ARTIFACT_NUMERIC_STAT_PROVENANCE };
 
 export const artifactsById: ReadonlyMap<string, ArtifactSetDefinition> = new Map(
   generatedArtifactSets.map((a) => [a.id, a]),

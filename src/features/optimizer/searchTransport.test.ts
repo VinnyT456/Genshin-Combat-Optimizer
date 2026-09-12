@@ -5,6 +5,7 @@ import type { SearchRequest } from "./optimizerAdapter";
 import {
   canonicalizeSerializable,
   createLocalSearchJob,
+  createWorkerSearchJob,
   createSearchJobRequest,
   fingerprintSerializable,
   isCurrentSearchResponse,
@@ -66,5 +67,54 @@ describe("local search job", () => {
     expect(response.replay.candidateFingerprints).toHaveLength(response.outcome.candidates.length);
     expect(isCurrentSearchResponse(response, envelope)).toBe(true);
     expect(isCurrentSearchResponse(response, { ...envelope, requestId: "run-old" })).toBe(false);
+  });
+});
+
+describe("worker search job", () => {
+  it("keeps the Worker boundary to plain messages and forwards progress", async () => {
+    const messages: unknown[] = [];
+    const fakeWorker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null as ((event: ErrorEvent) => void) | null,
+      postMessage(message: unknown) {
+        messages.push(message);
+        const request = message as { request: typeof envelope };
+        const outcome = {
+          candidates: [], requestedTopN: 5, nodesExpanded: 0,
+          budget: request.request.payload.budget,
+          objective: request.request.payload.objective,
+          durationSeconds: 5, beamWidth: 4,
+        };
+        const identity = { requestId: envelope.requestId, inputFingerprint: envelope.inputFingerprint };
+        this.onmessage?.({ data: { type: "started", ...identity, attempt: 1 } } as MessageEvent);
+        this.onmessage?.({ data: { type: "progress", ...identity, progress: { kind: "indeterminate", nodesExpanded: 0 } } } as MessageEvent);
+        this.onmessage?.({ data: { type: "completed", ...identity, response: {
+          ...identity, kind: "succeeded", outcome,
+          replay: { mode: "optimizer-emission-cold-replay", inputFingerprint: identity.inputFingerprint, candidateFingerprints: [] },
+        } } } as MessageEvent);
+      },
+      terminate() { /* fake */ },
+    };
+    const envelope = createSearchJobRequest("worker-1", request);
+    const events: string[] = [];
+    const response = await createWorkerSearchJob(envelope, () => fakeWorker).run((event) => events.push(event.type));
+    expect(messages[0]).toEqual({ type: "search", request: envelope, attempt: 1 });
+    expect(events).toEqual(["started", "progress", "completed"]);
+    expect(response.kind).toBe("succeeded");
+  });
+
+  it("acknowledges cancellation and ignores an obsolete identity", async () => {
+    const worker: { onmessage: ((event: MessageEvent) => void) | null; onerror: ((event: ErrorEvent) => void) | null; postMessage: (message: unknown) => void; terminate: () => void } = {
+      onmessage: null, onerror: null,
+      postMessage() { /* intentionally pending */ },
+      terminate() { /* fake */ },
+    };
+    const job = createWorkerSearchJob(createSearchJobRequest("worker-2", request), () => worker);
+    const events: string[] = [];
+    const pending = job.run((event) => events.push(event.type));
+    worker.onmessage?.({ data: { type: "completed", requestId: "old", inputFingerprint: "old", response: {} } } as MessageEvent);
+    expect(job.cancel()).toEqual({ acknowledged: true, reason: "requested" });
+    await expect(pending).resolves.toMatchObject({ kind: "canceled", reason: "requested" });
+    expect(events).toEqual(["canceled"]);
   });
 });
