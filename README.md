@@ -23,7 +23,7 @@
 
 当前本地 dashboard 首页：
 
-![当前本地 dashboard 首页](docs/assets/dashboard-screenshot.png)
+![当前本地 dashboard 首页](assets/dashboard.png)
 
 ## 快速开始
 
@@ -106,70 +106,3 @@ src/app, src/components, src/features Next.js / React 工作台和展示适配�
 ## 第三方与知识产权声明
 
 本项目是非官方工具，与 miHoYo、HoYoverse、KQM、Project Amber、Lunaris 或 Yatta 无隶属关系，也不代表这些组织。Genshin Impact、角色/武器/圣遗物名称、图像、文本和相关商标归其各自权利人所有。请遵守第三方站点的使用条款和数据许可；不要把本项目结果当作官方数据、投资建议或游戏内保证。
-
----
-
-# English
-
-Genshin Combat Optimizer is a Chinese-first, deterministic combat-rotation simulator and bounded rotation-search tool. It connects characters, weapons, artifacts, reactions, energy, cooldowns, enemy state, and action timing in one reproducible TypeScript pipeline. Use it to check whether a rotation can execute, understand where damage comes from, and inspect which parts of the current model are supported.
-
-> Status: local development project. Character coverage and conditional mechanics are still expanding. Results describe the modeled repository scope, not complete in-game behavior.
-
-## Current capabilities
-
-- A single-page workbench for team setup, levels, talents, constellations, weapon level/refinement, artifact slots, and authored artifact stats.
-- Enemy level/resistance, crit mode, swap time, and editable action-sequence controls.
-- Deterministic event simulation for multi-hit damage, talent levels, character/equipment buffs, elemental application and reactions, ICDs, enemy modifiers, energy, and cooldowns.
-- Result views for total damage, DPS, timeline, character/ability/element breakdowns, energy records, and event-bounded tactical insights.
-- Bounded beam-search rotation optimization through the simulator black box, with objective, candidate identity, budget, depth, and stop metadata.
-- Serializable snapshots and declared resource/healing/pickup events, plus input fingerprints for stale-result detection.
-- Recommended builds that apply KQM baselines when a character joins the team, including level-20 four-line artifacts with four starting substats and five upgrades, without duplicating the main stat.
-- Artifact values displayed to one decimal place, using the four real five-star substat roll tiers; generated values remain editable in the artifact editor.
-- Coverage, session history, A/B comparison, and local project/ReplayPack pages at `/coverage`, `/history`, `/compare`, and `/projects`.
-
-The search UI currently uses a bounded local call. Real Worker progress, cancellation, and queued-job lifecycle remain planned seams. Random passive outcomes, animation-frame/hitlag timing, multi-target state, and some external-state mechanics remain unsupported or explicitly unverified. Missing or conflicting source data is retained as unverified or fail-closed rather than guessed.
-
-## Screenshot
-
-Current local dashboard homepage:
-
-![Current local dashboard homepage](docs/assets/dashboard-screenshot.png)
-
-## Quick start
-
-```bash
-npm install
-npm run dev
-```
-
-Open <http://localhost:3000/> and click “执行循环模拟” to generate the result dashboard.
-
-## Development and tests
-
-```bash
-npm run dev
-npm run build
-npm run start
-npm run typecheck
-npm run lint
-npm run test
-npm run test:watch
-```
-
-## Architecture
-
-The simulation core is pure TypeScript and does not depend on React, the DOM, or IO. Data flows from `src/game-data` to mechanics, combat engine, simulation, optimizer, and finally the Next.js frontend. The main seams are `simulateRotation(...)`, `validateAction()`, `computeDamage()`, `getActiveBuffs(...)`, and `optimizeRotation(...)`. The frontend consumes these APIs through thin adapters; it does not reimplement damage or reaction math, and the optimizer treats the combat engine as a black box.
-
-## Data, provenance, and KQM attribution
-
-Generated character data lives under `src/game-data/characters/generated/` and includes level curves, support claims, and provenance. Weapon generation uses [Project Amber](https://gi.yatta.moe/) as the primary source and [Lunaris](https://lunaris.moe/) as an independent verifier. Recommended builds are hand-authored KQM baselines in `src/game-data/characters/recommendedBuildsData.ts`, not universal answers. Artifact substat scoring follows the [Game8 Artifact Score Checker](https://game8.co/games/Genshin-Impact/archives/476385), while roll tiers follow [Genshin Impact Wiki — Artifact/Stats](https://genshin-impact.fandom.com/wiki/Artifact/Stats). Formula and mechanic audits reference the [KQM Raiden Guide](https://keqingmains.com/raiden/) and [KQM TCL Raiden tables](https://library.keqingmains.com/characters/electro/raiden-shogun). Coverage states distinguish sourced, represented, executable, live-wired, and regression-tested facts; presentation support is not proof of runtime execution.
-
-## Contributing
-
-Read [AGENTS.md](AGENTS.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md). Keep ownership boundaries and one-way layering intact. Add provenance for new data, mark unverifiable values explicitly, preserve public API contracts, add tests for important behavior, and run typecheck, lint, tests, and relevant build checks before submitting a change.
-
-## Credits, license, and third-party disclaimer
-
-Thanks to KQM contributors and to Project Amber, Lunaris/Yatta, and everyone who has contributed audits, tests, and design work. The repository includes the [MIT License](LICENSE), with copyright Vincent Tang © 2026. That license applies only to files covered by this repository’s license; third-party data, icons, names, text, and game IP remain with their respective owners.
-
-This is an unofficial project and is not affiliated with miHoYo, HoYoverse, KQM, Project Amber, Lunaris, or Yatta. Genshin Impact and related names, images, text, and trademarks belong to their respective rights holders. Follow third-party terms and data licenses. Do not treat results as official game data, financial advice, or an in-game guarantee.
