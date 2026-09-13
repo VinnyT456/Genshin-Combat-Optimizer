@@ -1,5 +1,49 @@
 # PROJECT-STATUS.md
 
+## Wiki-backed Raiden and equipment confidence audit — 2026-09-12
+
+The second damage audit cross-checked the runtime against the
+[KQM Raiden guide](https://keqingmains.com/raiden/) and
+[KQM TCL Raiden tables](https://library.keqingmains.com/characters/electro/raiden-shogun).
+It found and fixed three concrete issues: Raiden's Skill Burst-DMG conversion
+was applying percentage points as a raw decimal, Emblem's ER conversion was not
+Burst-scoped, and triggered Eye abilities did not share the normal particle
+distribution path. The runtime now covers the sourced Eye Burst-DMG rule, no
+particle on the initial Skill slash, expected Eye particles, A1 Resolve ICD,
+Musou Isshin's five one-second-gated Energy refunds with A4 ER scaling, and the
+existing C2/C4/C6 lifecycle rules.
+
+A fixed Raiden National matrix now exercises authored artifact stats, The Catch
+R1/R5, Staff of Homa, Xingqiu's 祭礼剑 R5, Noblesse, Emblem, and Raiden C2/C6.
+It verifies finite/reconciled output and byte-deterministic replay. 祭礼剑's
+random cooldown reset remains fail-closed because the deterministic engine has
+no proc/RNG contract; weapon stats still apply. Full validation: 175 test files
+and 2,668 tests passed; typecheck, lint, and diff checks passed.
+
+This raises confidence for the deterministic modeled scope, not for complete
+live-game parity. Hitlag/animation-frame timing, random passive outcomes,
+multi-target state, and other unsupported conditional mechanics remain explicit
+limitations.
+
+## Optimal search and feature roadmap — 2026-09-12
+
+The product owner requested an optimal combat-combination search design and a
+prioritized website feature plan. The implementation-ready design is recorded in
+[OPTIMAL-SEARCH-AND-FEATURE-ROADMAP.md](planning/OPTIMAL-SEARCH-AND-FEATURE-ROADMAP.md).
+
+The plan keeps the deterministic combat engine as a black box and proposes one
+anytime best-first search core. It distinguishes exact frontier closure from
+bounded best-found results, defines proof-aware certificates, separates decision
+and observation horizons, and stages fixed-rotation build search before alternating
+build/rotation and team search. The first implementation gate is a complete state
+identity audit because the current optimizer key does not encode every
+future-relevant snapshot field.
+
+The website roadmap prioritizes trustworthy search, candidate comparison,
+explanation, project hydration and accessibility before build, robustness, team,
+cloud or community expansion. This entry is planning only; no optimizer runtime,
+website behavior, external account, deployment or commit was changed by it.
+
 ## Astra planning expansion — 2026-09-07
 
 The user requested an extensive plan, including new features, using Astra.
@@ -1004,3 +1048,21 @@ any engine-applied constellation talent-level boost. Clicking a card opens the
 existing character configuration surface for stats, talents, constellations,
 and level edits; nested weapon, artifact, and action controls keep their own
 click behavior.
+
+### Recommended artifact substat baselines — 2026-09-13
+
+Every authored character build now derives editable artifact substats from its
+KQM priority order. Each recommended artifact piece receives a deterministic
+level-20 four-line baseline using the Game8 normalization model and
+conventional five-star roll values: four starting lines plus five upgrades,
+distributed as [2, 1, 1, 1] so every line is upgraded at least once. The
+baseline avoids duplicating the piece's main stat and is applied when a
+character is newly added or when the default Raiden National team is loaded.
+It is a comparison fixture, not a claim about a player's sourced artifact
+inventory. Artifact values are rounded to one decimal, and each additional
+upgrade uses one of the four legal five-star increments for that stat.
+
+Focused scoring, complete-roster, build-selection and typecheck validation
+passed. The existing equipment-picker DOM suite still has unrelated selector
+ambiguity in its pre-existing default-build flow and is recorded separately
+from this data change.

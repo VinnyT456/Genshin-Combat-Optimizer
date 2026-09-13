@@ -63,8 +63,14 @@ read from the generated level curves, while character HP/ATK/DEF are replaced
 from the generated character curve when the level selector changes. Starter
 weapons shown on the team cards are also written into the initial equipment
 selection, so the first panel and first simulation share one deterministic
-state. Artifact pieces accept authored main/substats; zero-valued placeholder
-pieces remain available for set-tier counting without inventing gear values.
+state. Artifact pieces accept authored main/substats; recommended character
+builds additionally receive deterministic level-20 comparison substats derived
+from their KQM priority order: four lines plus five upgrades, with every line
+upgraded at least once. These are baseline values, not sourced player inventory
+rolls, and remain editable. The artifact editor rounds values to one decimal
+and adds only the four legal five-star roll increments for each substat.
+Zero-valued placeholder pieces remain available
+for set-tier counting without inventing gear values.
 Weapon browsing is separate from weapon configuration: `WeaponPicker` only
 filters and selects a card, then `WeaponDetailsPanel` edits level and
 refinement before confirming the selection back to the team builder.

@@ -1,6 +1,6 @@
 # Genshin Combat Simulator & Rotation Optimizer — Master Plan
 
-Updated: 2026-09-08. Planning expansion requested by the product owner, developed
+Updated: 2026-09-12. Planning expansion requested by the product owner, developed
 with three explicitly selected **gpt-6-astra** planning agents and integrated by
 the manager. This document plans future work; it does not claim those features
 have shipped or authorize external accounts, paid services or publication.
@@ -11,11 +11,13 @@ This is the forward-looking entry point. It expands the existing ROADMAP and
 WORK-MAP rather than discarding their decisions. Read in this order:
 
 1. This document: goals, priority, milestones, dependencies and scope decisions.
-2. [Engine, mechanics and optimizer plan](planning/ENGINE-OPTIMIZER-PLAN.md).
-3. [Product, UX and feature plan](planning/PRODUCT-UX-FEATURE-PLAN.md).
-4. [Data, platform and quality plan](planning/DATA-PLATFORM-QUALITY-PLAN.md).
-5. [Project status](PROJECT-STATUS.md): accepted implementation and validation.
-6. [Architecture](ARCHITECTURE.md) and [design system](design/DESIGN-SYSTEM.md):
+2. [Optimal search and feature roadmap](planning/OPTIMAL-SEARCH-AND-FEATURE-ROADMAP.md):
+   current-state algorithm design and recommended product sequence.
+3. [Engine, mechanics and optimizer plan](planning/ENGINE-OPTIMIZER-PLAN.md).
+4. [Product, UX and feature plan](planning/PRODUCT-UX-FEATURE-PLAN.md).
+5. [Data, platform and quality plan](planning/DATA-PLATFORM-QUALITY-PLAN.md).
+6. [Project status](PROJECT-STATUS.md): accepted implementation and validation.
+7. [Architecture](ARCHITECTURE.md) and [design system](design/DESIGN-SYSTEM.md):
    contracts that implementation must respect.
 
 The second Astra planning pass is recorded in
