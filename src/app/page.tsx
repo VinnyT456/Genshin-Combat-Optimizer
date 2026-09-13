@@ -31,7 +31,6 @@ import {
 } from "@/features/team-builder/equipmentSelection";
 import {
   findWeapon,
-  getDefaultWeapon,
 } from "@/game-data/weapons/registry";
 import { findArtifact } from "@/game-data/artifacts/registry";
 import type { AppView } from "@/features/simulation/urlState";
@@ -81,14 +80,9 @@ import { elementBgClass, fmtNum } from "@/lib/format";
 import { MAIN_CONTENT_ID } from "@/components/ui/landmarks";
 import { detectResonances } from "@/features/team-builder/resonance";
 import {
-  getCharacterMetadata,
   toWebsiteCharacter,
 } from "@/features/team-builder/rosterModel";
-import {
-  DEFAULT_REFINEMENT,
-  DEFAULT_WEAPON_LEVEL,
-  equipWeapon,
-} from "@/features/team-builder/equipmentSelection";
+import { mergeRecommendedBuildEquipment } from "@/features/team-builder/recommendedBuildSelection";
 import type {
   CharacterDefinition,
   Element,
@@ -128,15 +122,7 @@ function defaultEquipmentForTeam(team: Team): EquipmentSelections {
   let selections = emptyEquipmentSelections();
   for (const character of team) {
     if (character === null) continue;
-    const metadata = getCharacterMetadata(character.id);
-    const weapon = getDefaultWeapon(metadata.weaponType);
-    selections = equipWeapon(
-      selections,
-      character.id,
-      weapon.id,
-      DEFAULT_REFINEMENT,
-      DEFAULT_WEAPON_LEVEL,
-    );
+    selections = mergeRecommendedBuildEquipment(selections, character);
   }
   return selections;
 }
@@ -147,15 +133,8 @@ function mergeDefaultEquipment(
 ): EquipmentSelections {
   let next = selections;
   for (const character of team) {
-    if (character === null || selections[character.id]?.weaponId !== undefined) continue;
-    const metadata = getCharacterMetadata(character.id);
-    next = equipWeapon(
-      next,
-      character.id,
-      getDefaultWeapon(metadata.weaponType).id,
-      DEFAULT_REFINEMENT,
-      DEFAULT_WEAPON_LEVEL,
-    );
+    if (character === null) continue;
+    next = mergeRecommendedBuildEquipment(next, character);
   }
   return next;
 }
@@ -182,19 +161,20 @@ export default function Home() {
   // relabel numbers that were computed for a different team (UX-005).
   const [run, setRun] = useState<SimulationRun | null>(null);
 
-  // Initial team: Raiden National Team
   const roster = useMemo(
     () => allCharacters.map(toWebsiteCharacter),
     [],
   );
-  const [team, setTeam] = useState<Team>(() => {
-    return teamFrom(
+  // First visit starts from the authored Raiden National preset. Its equipment
+  // is resolved below through the same recommended-build selection path.
+  const [team, setTeam] = useState<Team>(() =>
+    teamFrom(
       nationalTeam.flatMap((preset) => {
         const character = roster.find((candidate) => candidate.id === preset.id);
         return character === undefined ? [] : [character];
       }),
-    );
-  });
+    ),
+  );
   const initialTeamRef = useRef(team);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
 

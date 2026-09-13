@@ -8,6 +8,7 @@ import type {
   EquipmentStat,
   EquipmentStatKey,
 } from "@/simulation/character/equipment";
+import type { Element } from "@/types";
 import { ARTIFACT_SLOTS } from "@/simulation/character/equipment";
 import { cn } from "@/components/ui/cn";
 import { FOCUS_RING } from "@/components/ui/tokens";
@@ -24,19 +25,44 @@ const STAT_OPTIONS: readonly { key: EquipmentStatKey; label: string; percent?: b
   { key: "energyRecharge", label: "元素充能", percent: true },
   { key: "elementalMastery", label: "元素精通" },
   { key: "dmgBonus", label: "伤害加成", percent: true },
+  // Elemental damage is rendered as seven specific options below. Keep this
+  // entry for the shared percentage formatting lookup.
   { key: "elementalDmgBonus", label: "元素伤害", percent: true },
 ];
 
-const ELEMENT_OPTIONS = [
-  ["pyro", "火"],
-  ["hydro", "水"],
+const ELEMENT_OPTIONS: readonly (readonly [Element, string])[] = [
   ["anemo", "风"],
+  ["geo", "岩"],
   ["electro", "雷"],
   ["dendro", "草"],
+  ["hydro", "水"],
+  ["pyro", "火"],
   ["cryo", "冰"],
-  ["geo", "岩"],
   ["physical", "物理"],
 ] as const;
+
+type StatSelectorValue = EquipmentStatKey | `elementalDmgBonus:${Element}`;
+
+function statSelectorValue(stat: EquipmentStat | undefined): StatSelectorValue {
+  if (stat?.stat === "elementalDmgBonus") {
+    return `elementalDmgBonus:${stat.element ?? "pyro"}`;
+  }
+  return stat?.stat ?? "atkFlat";
+}
+
+function statFromSelector(value: string): {
+  key: EquipmentStatKey;
+  element?: Element;
+} {
+  const prefix = "elementalDmgBonus:";
+  if (value.startsWith(prefix)) {
+    const element = value.slice(prefix.length);
+    if (ELEMENT_OPTIONS.some(([key]) => key === element)) {
+      return { key: "elementalDmgBonus", element: element as Element };
+    }
+  }
+  return { key: value as EquipmentStatKey };
+}
 
 const SLOT_LABELS: Record<ArtifactSlot, string> = {
   flower: "生之花",
@@ -71,20 +97,18 @@ const PRESET_SUBSTATS: Record<ArtifactStatPresetId, readonly EquipmentStat[]> = 
   balanced: [
     { stat: "critRate", value: 0.066 },
     { stat: "critDmg", value: 0.132 },
-    { stat: "atkPercent", value: 0.0583 },
-    { stat: "energyRecharge", value: 0.0518 },
+    { stat: "atkPercent", value: 0.058 },
+    { stat: "energyRecharge", value: 0.052 },
   ],
   crit: [
     { stat: "critRate", value: 0.066 },
-    { stat: "critDmg", value: 0.132 },
-    { stat: "critDmg", value: 0.132 },
-    { stat: "atkPercent", value: 0.0583 },
+    { stat: "critDmg", value: 0.264 },
+    { stat: "atkPercent", value: 0.058 },
   ],
   energy: [
-    { stat: "energyRecharge", value: 0.0518 },
-    { stat: "energyRecharge", value: 0.0518 },
-    { stat: "critRate", value: 0.033 },
-    { stat: "atkPercent", value: 0.0583 },
+    { stat: "energyRecharge", value: 0.104 },
+    { stat: "critRate", value: 0.031 },
+    { stat: "atkPercent", value: 0.058 },
   ],
 };
 
@@ -118,14 +142,15 @@ function optionFor(stat: EquipmentStatKey) {
 function displayValue(stat: EquipmentStat | undefined): string {
   if (!stat) return "";
   const option = optionFor(stat.stat);
-  return option.percent ? String(Number((stat.value * 100).toFixed(4))) : String(stat.value);
+  return (option.percent ? stat.value * 100 : stat.value).toFixed(1);
 }
 
 function fromDisplayValue(stat: EquipmentStatKey, raw: string): number | undefined {
   if (raw.trim() === "") return undefined;
   const value = Number(raw);
   if (!Number.isFinite(value)) return undefined;
-  return optionFor(stat).percent ? value / 100 : value;
+  const rounded = Number(value.toFixed(1));
+  return optionFor(stat).percent ? rounded / 100 : rounded;
 }
 
 /** Normalize a partial draft to the selected set and piece count. */
@@ -233,7 +258,7 @@ export function ArtifactStatsEditor({
       <div>
         <h4 className="text-xs font-semibold text-slate-200">圣遗物词条</h4>
         <p className="mt-1 text-micro leading-relaxed text-slate-400">
-          百分比按百分数填写，例如 46.6；空白按 0 处理。
+          默认推荐圣遗物按20级四词条生成（4条副词条+5次强化）；所有数值显示到小数点后1位，百分比按百分数填写，例如46.6。
         </p>
       </div>
       <div className="space-y-2">
@@ -297,42 +322,52 @@ function StatRow({
   onStatChange: (stat: EquipmentStatKey, value: number | undefined, element?: string) => void;
 }) {
   const selected = stat?.stat ?? "atkFlat";
+  const selectedValue = statSelectorValue(stat);
   const option = optionFor(selected);
   return (
-    <div className="grid grid-cols-[5.25rem_minmax(0,1fr)_5rem] items-center gap-1.5">
-      <span className="text-micro text-slate-400">{label}</span>
-      <select
-        aria-label={`${label}类型`}
-        value={selected}
-        onChange={(event) => onStatChange(event.target.value as EquipmentStatKey, undefined, stat?.element)}
-        className={cn("min-w-0 rounded border border-surface-border bg-surface px-1.5 py-1 text-micro text-slate-200", FOCUS_RING)}
-      >
-        <option value="atkFlat">未设置</option>
-        {STAT_OPTIONS.map((entry) => (
-          <option key={entry.key} value={entry.key}>{entry.label}</option>
-        ))}
-      </select>
-      <input
-        aria-label={`${label}数值`}
-        type="number"
-        min={0}
-        step="any"
-        value={stat && stat.value !== 0 ? displayValue(stat) : ""}
-        placeholder="0"
-        onChange={(event) => onStatChange(selected, fromDisplayValue(selected, event.target.value), stat?.element)}
-        className={cn("w-full rounded border border-surface-border bg-surface px-1.5 py-1 text-right text-micro font-mono text-slate-200", FOCUS_RING)}
-      />
-      {selected === "elementalDmgBonus" && (
+    <div className="space-y-1">
+      <div className="grid grid-cols-[5.25rem_minmax(0,1fr)_5rem] items-center gap-1.5">
+        <span className="text-micro text-slate-400">{label}</span>
         <select
-          aria-label={`${label}元素`}
-          value={stat?.element ?? "pyro"}
-          onChange={(event) => onStatChange(selected, stat?.value ?? 0, event.target.value)}
-          className={cn("col-span-2 rounded border border-surface-border bg-surface px-1.5 py-1 text-micro text-slate-200", FOCUS_RING)}
+          aria-label={`${label}类型`}
+          value={selectedValue}
+          onChange={(event) => {
+            const next = statFromSelector(event.target.value);
+            onStatChange(next.key, undefined, next.element);
+          }}
+          className={cn("min-w-0 rounded border border-surface-border bg-surface px-1.5 py-1 text-micro text-slate-200", FOCUS_RING)}
         >
-          {ELEMENT_OPTIONS.map(([key, text]) => <option key={key} value={key}>{text}元素</option>)}
+          <option value="atkFlat">未设置</option>
+          {STAT_OPTIONS.filter((entry) => entry.key !== "elementalDmgBonus").map((entry) => (
+            <option key={entry.key} value={entry.key}>{entry.label}</option>
+          ))}
+          {ELEMENT_OPTIONS.map(([element, text]) => (
+            <option
+              key={`elementalDmgBonus:${element}`}
+              value={`elementalDmgBonus:${element}`}
+            >
+              {text}元素伤害
+            </option>
+          ))}
         </select>
-      )}
-      <span className="sr-only">{option.percent ? "百分比" : "固定值"}</span>
+        <input
+          aria-label={`${label}数值`}
+          type="number"
+          min={0}
+          step={0.1}
+          value={stat && stat.value !== 0 ? displayValue(stat) : ""}
+          placeholder="0.0"
+          onChange={(event) =>
+            onStatChange(
+              selected,
+              fromDisplayValue(selected, event.target.value),
+              stat?.element,
+            )
+          }
+          className={cn("w-full rounded border border-surface-border bg-surface px-1.5 py-1 text-right text-micro font-mono text-slate-200", FOCUS_RING)}
+        />
+        <span className="sr-only">{option.percent ? "百分比" : "固定值"}</span>
+      </div>
     </div>
   );
 }

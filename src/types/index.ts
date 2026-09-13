@@ -1130,6 +1130,25 @@ export type ArtifactStateEffect =
       excludeSource?: boolean;
     }
   | {
+      /** Grants flat Energy to the party after a qualifying source hit. */
+      kind: "partyEnergyOnHit";
+      sourceCharacterId: string;
+      amount: number;
+      cooldownSeconds: number;
+      maxTriggers?: number;
+      actionTypes?: readonly ActionType[];
+      damageTypes?: readonly DamageType[];
+      elements?: readonly Element[];
+      /** Optional stance id that must be active on the source. */
+      requiresStanceId?: string;
+      excludeSource?: boolean;
+      /** A4-style multiplier: max(0, ER - threshold) * ratio. */
+      energyRechargeScaling?: {
+        threshold: number;
+        ratio: number;
+      };
+    }
+  | {
       /** Reduces selected cooldowns after a qualifying reaction. */
       kind: "cooldownReductionOnReaction";
       sourceCharacterId: string;

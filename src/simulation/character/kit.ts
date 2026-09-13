@@ -262,6 +262,15 @@ export interface ResourceDefinition {
     excludeSource?: boolean;
   };
   /**
+   * Optional gain when the party collects an elemental particle or orb.
+   * `amount` is per expected particle unit, so deterministic expected-value
+   * emissions may use fractional particle counts.
+   */
+  gainOnParticlePickup?: {
+    amount: number;
+    cooldownSeconds: number;
+  };
+  /**
    * When true, a burst cast by the owning character consumes the current
    * value after its hits have captured any `snapshot: "cast"` scaling terms.
    * This is data rather than a Raiden-specific engine branch so future

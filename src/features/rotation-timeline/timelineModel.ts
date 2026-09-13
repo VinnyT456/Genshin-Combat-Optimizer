@@ -5,7 +5,7 @@ import type {
   SimulationWarning,
 } from "@/types";
 import { actionTypeZh, charNameZh, elementZh, reactionZh } from "@/lib/i18n";
-import { parseReactionKey } from "@/lib/reactionLabel";
+import { parseReactionKey, parseReactionTickKey } from "@/lib/reactionLabel";
 
 // ---------------------------------------------------------------------------
 // Pure presentation model for the multi-lane rotation timeline.
@@ -54,6 +54,10 @@ export function abilityClassLabel(cls: AbilityClass): string {
 export function abilityLabelZh(abilityId: string, damageType?: string): string {
   const reaction = parseReactionKey(abilityId);
   if (reaction !== null) return `反应：${reactionZh(reaction.reactionKind)}`;
+  const reactionTick = parseReactionTickKey(abilityId);
+  if (reactionTick !== null) {
+    return `反应：${reactionZh(reactionTick.reactionKind)}（持续伤害）`;
+  }
   if (damageType !== undefined) {
     const label = actionTypeZh(damageType);
     if (label !== damageType) return label;

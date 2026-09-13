@@ -17,13 +17,16 @@ import type { EquipmentStat } from "@/simulation/character/equipment";
 //   sands    — a MainStat token (below)
 //   goblet   — a MainStat token
 //   circlet  — a MainStat token
+//   substatPriorities — ordered SubstatToken guidance, highest first
 //   note     — optional free text, e.g. an ER threshold reminder
 //
 // Level is always 90 and talents 9/9/9 (the app defaults) — you do not author
-// those. Substats are not authored (the table pins MAIN stats only, matching how
-// the artifact editor works). A row left as `null` = "no recommended build" and
-// the character keeps the generic weapon-type default on select, exactly as the
-// ~128 unfilled characters do today.
+// those. Substat priorities are used to create a deterministic comparison
+// baseline for the recommended loadout; the values are not random roll
+// outcomes and remain editable by the user. A row left as `null` = "no recommended build" and
+// the character keeps the generic weapon-type default on select. The current
+// authored catalog fills every generated roster row; null remains supported for
+// future characters or intentionally source-blocked data.
 //
 // NON-DAMAGE MAIN STATS. Some real KQM main stats (Healing Bonus%, Physical
 // DMG% on a non-physical carry used purely as a stat stick, etc.) do not affect
@@ -107,13 +110,28 @@ export interface AuthoredBuild {
   readonly goblet?: MainStatToken;
   /** Circlet main stat (`crit_rate` / `crit_dmg`, or `heal%` for a healer). */
   readonly circlet?: MainStatToken;
+  /** Ordered KQM-style substat priority, highest value first. */
+  readonly substatPriorities?: readonly SubstatToken[];
   /** Optional free-text reminder, e.g. `"ER ~200%+ team-dependent"`. Not shown as a stat. */
   readonly note?: string;
 }
 
+/** Artifact substat tokens, ordered from highest to lower priority. */
+export type SubstatToken =
+  | "HP"
+  | "ATK"
+  | "DEF"
+  | "HP%"
+  | "ATK%"
+  | "DEF%"
+  | "EM"
+  | "ER%"
+  | "crit_rate"
+  | "crit_dmg";
+
 // ---------------------------------------------------------------------------
-// Compiled shape — what the app consumes. Unchanged from the original hand-
-// written `BaseBuild`; only the way it is AUTHORED changed.
+// Compiled shape — what the app consumes. Main-stat magnitudes remain
+// deterministic; substat priorities are metadata for build guidance.
 // ---------------------------------------------------------------------------
 
 export interface BaseBuildMainStats {
@@ -127,6 +145,8 @@ export interface BaseBuild {
   readonly weaponId: string;
   readonly artifactSetId: string;
   readonly mainStats: BaseBuildMainStats;
+  /** Ordered KQM guidance used by the deterministic artifact baseline generator. */
+  readonly substatPriorities?: readonly SubstatToken[];
   /** Honesty note for a circlet whose real main stat the engine cannot model. */
   readonly circletNote?: string;
   /** The author's free-text `note`, carried through for display if wanted. */
@@ -205,6 +225,7 @@ export function compileAuthoredBuild(
       goblet: goblet.stat,
       circlet: circlet.stat,
     },
+    substatPriorities: authored.substatPriorities,
     // Only the circlet currently surfaces a non-damage note in the UI.
     circletNote: circlet.note,
     note: authored.note,

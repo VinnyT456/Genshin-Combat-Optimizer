@@ -92,4 +92,18 @@ describe("compileAuthoredBuild", () => {
     })!;
     expect(b.note).toBe("ER ~250%");
   });
+
+  it("carries ordered substat priorities through to the baseline compiler", () => {
+    const b = compileAuthoredBuild({
+      weapon: "engulfinglightning",
+      set: "emblem-of-severed-fate",
+      substatPriorities: ["ER%", "crit_rate", "crit_dmg", "ATK%"],
+    })!;
+    expect(b.substatPriorities).toEqual([
+      "ER%",
+      "crit_rate",
+      "crit_dmg",
+      "ATK%",
+    ]);
+  });
 });

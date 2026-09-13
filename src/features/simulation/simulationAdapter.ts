@@ -172,7 +172,10 @@ export function toEngineCharacter(
       (character.id === "raiden-shogun" || character.id === "raiden")
     ) {
       const selectedConstellation = character.constellation ?? 0;
-      const adapted = createRaidenShogunDefinition(selectedConstellation);
+      const adapted = createRaidenShogunDefinition(
+        selectedConstellation,
+        character.talentLevels ?? { normal: 1, skill: 1, burst: 1 },
+      );
       return {
         ...adapted,
         level: character.level,
@@ -191,7 +194,10 @@ export function toEngineCharacter(
     character.constellation ?? character.engineDefinition.constellationLevel;
     const baseDefinition =
     character.id === "raiden-shogun" || character.id === "raiden"
-      ? createRaidenShogunDefinition(selectedConstellation)
+      ? createRaidenShogunDefinition(
+          selectedConstellation,
+          character.talentLevels ?? character.engineDefinition.talentLevels,
+        )
       : character.id === "xiangling"
         ? createXianglingDefinition(selectedConstellation)
       : character.id === "bennett"
@@ -271,7 +277,12 @@ export function runSimulation({
   const autoArtifactStateEffects = engineTeam.flatMap((character) => {
     if (!("normalAttacks" in character)) return [];
     if (character.id !== "raiden-shogun" && character.id !== "raiden") return [];
-    return raidenArtifactStateEffects(character.id, character.constellationLevel);
+    return raidenArtifactStateEffects(
+      character.id,
+      character.constellationLevel,
+      character.talentLevels.burst,
+      character.ascensionPhase,
+    );
   });
 
   const mergedConfig: SimulationConfig = {

@@ -74,6 +74,10 @@ describe("complete artifact set compiler", () => {
       expect(row, id).toBeDefined();
       expect(row?.fourPiece?.length, id).toBeGreaterThan(0);
     }
+    expect(completeSetBonusBuffsById("emblem-of-severed-fate")?.fourPiece?.[0]).toMatchObject({
+      conditions: { damageTypes: ["burst"] },
+      conversions: [{ sourceStat: "energyRecharge", targetStat: "dmgBonus", ratio: 0.25, maxCap: 0.75 }],
+    });
   });
 
   it("wires the remaining deterministic stat and damage rows", () => {

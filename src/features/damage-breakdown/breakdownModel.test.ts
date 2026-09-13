@@ -181,6 +181,27 @@ describe("buildBreakdownTables", () => {
     ]);
   });
 
+  it("labels standalone reaction ticks as reaction damage", () => {
+    const tables = buildBreakdownTables({
+      ...source,
+      totalDamage: 100,
+      damageByAbility: { "electroCharged:tick": 100 },
+      abilityNamesById: { "electroCharged:tick": "electroCharged" },
+      damageByCharacter: { Xingqiu: 100 },
+      damageByElement: { Electro: 100 },
+      timeline: [
+        {
+          type: "damage",
+          damage: {
+            abilityId: "electroCharged:tick",
+            sourceCharacterId: "xingqiu",
+          },
+        },
+      ],
+    });
+    expect(tables[0]?.rows[0]?.label).toBe("感电 · 持续伤害");
+  });
+
   it("tolerates an entirely empty result", () => {
     const tables = buildBreakdownTables({
       totalDamage: 0,

@@ -18,6 +18,7 @@ import {
   sumActiveHealing,
   sumActiveEnemyModifiers,
 } from "@/simulation/buffs/resolver";
+import { applyEnergyCostDmgBonuses } from "@/simulation/buffs/conversions";
 import type { CharacterDefenseTotals } from "@/simulation/buffs/resolver";
 import type { HealingTotals } from "@/simulation/buffs/resolver";
 import type { TalentLevelBoosts } from "@/simulation/buffs/talentLevel";
@@ -114,7 +115,11 @@ export function makeBuffResolver(options: MakeBuffResolverOptions): BuffResolver
     // The id-keyed map is passed as the FALLBACK only; `foldBuffsIntoStats`
     // applies `resolveBaseValues`, under which `base.base` takes precedence.
     const explicitBaseValues = baseStats[context.character.id] ?? {};
-    return foldBuffsIntoStats(base, active, explicitBaseValues);
+    return applyEnergyCostDmgBonuses(
+      foldBuffsIntoStats(base, active, explicitBaseValues),
+      active,
+      context.ability,
+    );
   };
 }
 

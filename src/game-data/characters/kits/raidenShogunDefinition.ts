@@ -6,13 +6,23 @@
  * the Musou Isshin stance, and the constellation support boundary.
  */
 
-import type { GenericCharacterDefinition } from "@/simulation/character/character";
+import type { GenericCharacterDefinition, TalentLevels } from "@/simulation/character/character";
 import type { KitAbility, NormalAttackString } from "@/simulation/character/kit";
+import { talentTable, talentValueAt } from "@/simulation/character/talent";
 import type { StanceDefinition } from "@/simulation/buffs/types";
 import type { ArtifactStateEffect } from "@/types";
 import { raidenShogun } from "../generated/electro";
 
 const RESOLVE_RESOURCE_ID = "raiden-resolve";
+
+// Sourced KQM TCL talent rows. The skill's Burst-DMG buff and Musou Isshin's
+// flat Energy restoration use the Skill/Burst talent level respectively.
+const RAIDEN_SKILL_BURST_DMG_BONUS = talentTable([
+  0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.30,
+]);
+const RAIDEN_BURST_ENERGY_RESTORATION = talentTable([
+  1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5,
+]);
 
 // Resolve coefficients cross-checked against KQM's Raiden guide/library and
 // the generated Lunaris/Project Amber talent rows. They are additive ATK
@@ -214,9 +224,25 @@ function raidenStance(
 export function raidenArtifactStateEffects(
   sourceCharacterId: string,
   constellationLevel: number,
+  burstTalentLevel = 10,
+  ascensionPhase = 6,
 ): readonly ArtifactStateEffect[] {
-  if (constellationLevel < 6) return [];
-  return [
+  const effects: ArtifactStateEffect[] = [
+    {
+      kind: "partyEnergyOnHit",
+      sourceCharacterId,
+      amount: talentValueAt(RAIDEN_BURST_ENERGY_RESTORATION, burstTalentLevel),
+      cooldownSeconds: 1,
+      maxTriggers: 5,
+      actionTypes: ["normal", "charged", "plungeLow", "plungeHigh"],
+      damageTypes: ["burst"],
+      requiresStanceId: RAIDEN_SHOGUN_KIT_METADATA.stance.id,
+      ...(ascensionPhase >= 4
+        ? { energyRechargeScaling: { threshold: 1, ratio: 0.6 } }
+        : {}),
+    },
+  ];
+  if (constellationLevel >= 6) effects.push(
     {
       kind: "cooldownReductionOnHit",
       sourceCharacterId,
@@ -228,11 +254,15 @@ export function raidenArtifactStateEffects(
       requiresStanceId: RAIDEN_SHOGUN_KIT_METADATA.stance.id,
       excludeSource: true,
     },
-  ];
+  );
+  return effects;
 }
 
 /** Build a generic Raiden definition for a selected constellation level. */
-export function createRaidenShogunDefinition(constellationLevel = 0): GenericCharacterDefinition {
+export function createRaidenShogunDefinition(
+  constellationLevel = 0,
+  talentLevels: TalentLevels = raidenShogun.talentLevels,
+): GenericCharacterDefinition {
   const level = Math.max(0, Math.min(6, Math.trunc(constellationLevel)));
   // The generated skill table contains both the initial cast hit and the
   // Eye's coordinated hit as instances. The latter is a field trigger, so it
@@ -241,7 +271,26 @@ export function createRaidenShogunDefinition(constellationLevel = 0): GenericCha
   const eyeInstance = generatedSkill.instances[1];
   const skillWithoutEye = {
     ...generatedSkill,
+    // The initial slash does not generate particles. Each Eye proc has a 50%
+    // chance to generate one Electro particle; fractional count is the
+    // engine's deterministic expected-value representation of that chance.
+    particles: undefined,
     instances: generatedSkill.instances.slice(0, 1),
+    buffs: [
+      {
+        id: "raiden-shogun-eye-burst-dmg",
+        source: "雷电将军·恶曜开眼",
+        sourceCharacterId: "raiden-shogun",
+        startTime: 0,
+        duration: 25,
+        stacking: { mode: "refresh" as const },
+        targets: { scope: "party" as const },
+        energyCostDmgBonus: {
+          ratio: talentValueAt(RAIDEN_SKILL_BURST_DMG_BONUS, talentLevels.skill),
+          damageTypes: ["burst"] as const,
+        },
+      },
+    ],
     ...(eyeInstance
       ? {
           triggers: [
@@ -258,6 +307,7 @@ export function createRaidenShogunDefinition(constellationLevel = 0): GenericCha
                 castTime: 0,
                 cooldown: { values: [0] },
                 energyCost: 0,
+                particles: { count: 0.5, element: "electro" as const },
                 instances: [eyeInstance],
               },
               sourceCharacterId: "raiden-shogun",
@@ -329,6 +379,7 @@ export function createRaidenShogunDefinition(constellationLevel = 0): GenericCha
         : passive,
     ),
     constellations,
+    talentLevels,
     resources: [
       {
         id: RAIDEN_SHOGUN_KIT_METADATA.resolve.id,
@@ -345,6 +396,10 @@ export function createRaidenShogunDefinition(constellationLevel = 0): GenericCha
             electro: level >= 1 ? 1.8 : 1,
           },
           excludeSource: true,
+        },
+        gainOnParticlePickup: {
+          amount: 2,
+          cooldownSeconds: 3,
         },
         consumeOnBurstCast: true,
       },

@@ -4,7 +4,7 @@ import type {
 } from "@/types";
 import { fmtNum, fmtPercent } from "@/lib/format";
 import { charNameZh } from "@/lib/i18n";
-import { parseReactionKey } from "@/lib/reactionLabel";
+import { isReactionDamageAbilityId } from "@/lib/reactionLabel";
 import { abilityLabelZh } from "@/features/rotation-timeline/timelineModel";
 
 export interface RotationInsight {
@@ -148,7 +148,7 @@ export function generateRotationInsights(
     (e) => e.type === "damage" && Boolean(e.damage),
   );
   const reactionEvents = damageEvents.filter(
-    (e) => e.damage && parseReactionKey(e.damage.abilityId) !== null,
+    (e) => e.damage && isReactionDamageAbilityId(e.damage.abilityId),
   );
 
   const reactionCount = reactionEvents.length;

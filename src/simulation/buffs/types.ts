@@ -467,6 +467,16 @@ export interface Buff {
    */
   conversions?: readonly StatConversionModifier[];
   /**
+   * DMG bonus derived from the energy cost of the ability being evaluated.
+   * This is distinct from a character-wide conversion: Raiden's Eye, for
+   * example, scales the target's Burst DMG bonus by that target Burst's cost.
+   */
+  energyCostDmgBonus?: {
+    ratio: number;
+    maxCap?: number;
+    damageTypes?: readonly DamageType[];
+  };
+  /**
    * Enemy-side debuffs (DEF/RES shred) carried by this buff, per stack.
    *
    * Gated by exactly the same window / targeting / condition rules as

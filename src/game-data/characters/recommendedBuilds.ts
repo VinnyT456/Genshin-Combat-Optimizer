@@ -10,6 +10,7 @@ import type {
   BaseBuildMainStats,
 } from "./buildAuthoring";
 import { compileAuthoredBuild } from "./buildAuthoring";
+import { baselineArtifactSubstats } from "./artifactSubstatScoring";
 import { AUTHORED_BASE_BUILDS } from "./recommendedBuildsData";
 
 // ---------------------------------------------------------------------------
@@ -54,9 +55,19 @@ export const RECOMMENDED_BASE_BUILDS: Readonly<Record<string, BaseBuild>> =
     }),
   );
 
+/** Legacy ids accepted by the engine and older saved teams. */
+const RECOMMENDED_BUILD_ID_ALIASES: Readonly<Record<string, string>> = {
+  raiden: "raiden-shogun",
+};
+
 /** The recommended build for a character, or `undefined` if none is defined. */
-export function recommendedBuildFor(characterId: string): BaseBuild | undefined {
-  return RECOMMENDED_BASE_BUILDS[characterId];
+export function recommendedBuildFor(
+  characterId: string,
+): BaseBuild | undefined {
+  return (
+    RECOMMENDED_BASE_BUILDS[characterId] ??
+    RECOMMENDED_BASE_BUILDS[RECOMMENDED_BUILD_ID_ALIASES[characterId] ?? ""]
+  );
 }
 
 /** The equipped loadout the match check reads: weapon id, set id, and the three
@@ -140,17 +151,20 @@ function mainStatForSlot(
  * ALL FIVE SLOTS are filled with the recommended set so the spec's sands,
  * goblet AND circlet main stats all take effect — occupying five slots of a
  * "4pc" set still counts as (and only as) the 4pc tier, so this is faithful to
- * the build. Substats are left empty on purpose: this table authors main stats
- * only, the same convention `normalizeArtifactLoadout` uses.
+ * the build. Each piece receives four substat lines and five deterministic
+ * upgrades ([2, 1, 1, 1]), derived from the authored priority order. These are
+ * comparison values, not random roll outcomes, and remain editable in the
+ * artifact editor.
  */
 export function baseBuildArtifactLoadout(build: BaseBuild): ArtifactLoadout {
   const loadout: ArtifactLoadout = {};
   for (const slot of ARTIFACT_SLOTS) {
+    const mainStat = mainStatForSlot(slot, build.mainStats);
     const piece: ArtifactPiece = {
       slot,
       setId: build.artifactSetId,
-      mainStat: mainStatForSlot(slot, build.mainStats),
-      substats: [],
+      mainStat,
+      substats: baselineArtifactSubstats(build.substatPriorities, mainStat),
     };
     loadout[slot] = piece;
   }

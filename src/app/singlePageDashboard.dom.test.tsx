@@ -66,6 +66,11 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     }
   });
 
+  it("starts with the Raiden National recommended builds", async () => {
+    await renderRoot();
+    expect(screen.getAllByText("符合 KQM 基准")).toHaveLength(4);
+  });
+
   it("reaches the results, breakdown and timeline without leaving the page", async () => {
     await renderRoot();
     // The timeline and breakdown are inside the results region, which by

@@ -158,6 +158,98 @@ describe("Raiden Shogun constellation runtime", () => {
     expect(run(2)).toBeGreaterThan(run(0));
   });
 
+  it("applies Eye's Burst-DMG bonus from the target burst cost", () => {
+    const bennett = generatedCharactersById.get("bennett");
+    if (!bennett) throw new Error("Bennett generated definition missing");
+
+    const damage = (withEye: boolean) => {
+      const raiden = createRaidenShogunDefinition();
+      const result = simulateRotation(
+        [raiden, bennett],
+        withEye
+          ? [
+              { characterId: raiden.id, actionType: "skill" as const },
+              { characterId: bennett.id, actionType: "burst" as const },
+            ]
+          : [{ characterId: bennett.id, actionType: "burst" as const }],
+        testEnemy,
+        { critMode: "never", resumeFrom: fullEnergySnapshot([raiden, bennett]) },
+      );
+      return result.timeline.find(
+        (event) =>
+          event.type === "damage" &&
+          event.characterId === bennett.id &&
+          event.damage?.abilityId?.includes("bennett-burst"),
+      )?.damage?.finalDamage ?? 0;
+    };
+
+    expect(damage(true)).toBeCloseTo(damage(false) * 1.18, 8);
+  });
+
+  it("restores party Energy five times and scales it with Raiden A4 ER", () => {
+    const bennett = generatedCharactersById.get("bennett");
+    if (!bennett) throw new Error("Bennett generated definition missing");
+
+    const run = (ascensionPhase: number) => {
+      const raiden = createRaidenShogunDefinition();
+      const resume = fullEnergySnapshot([raiden, bennett]);
+      resume.characters[bennett.id]!.energy.current = 0;
+      resume.characters[bennett.id]!.energy.totalGained = 0;
+      const result = simulateRotation(
+        [raiden, bennett],
+        [
+          { characterId: raiden.id, actionType: "burst" },
+          ...Array.from({ length: 18 }, () => ({
+            characterId: raiden.id,
+            actionType: "normal" as const,
+          })),
+        ],
+        testEnemy,
+        {
+          critMode: "never",
+          artifactStateEffects: raidenArtifactStateEffects(raiden.id, 0, 10, ascensionPhase),
+          resumeFrom: resume,
+        },
+      );
+      return {
+        result,
+        energyEvents: result.timeline.filter(
+          (event) =>
+            event.type === "energy" &&
+            event.characterId === bennett.id &&
+            event.description.includes("Raiden Shogun"),
+        ),
+      };
+    };
+
+    const a4 = run(6);
+    const preA4 = run(3);
+    expect(a4.energyEvents).toHaveLength(5);
+    expect(preA4.energyEvents).toHaveLength(5);
+    expect(a4.result.finalState.characters[bennett.id]?.energy.current).toBeCloseTo(14.9, 8);
+    expect(preA4.result.finalState.characters[bennett.id]?.energy.current).toBeCloseTo(12.5, 8);
+  });
+
+  it("routes Eye's expected particle into A1 Resolve with its cooldown", () => {
+    const bennett = generatedCharactersById.get("bennett");
+    if (!bennett) throw new Error("Bennett generated definition missing");
+    const raiden = createRaidenShogunDefinition();
+    const result = simulateRotation(
+      [raiden, bennett],
+      [
+        { characterId: raiden.id, actionType: "skill" },
+        { characterId: bennett.id, actionType: "normal" },
+      ],
+      testEnemy,
+    );
+    expect(result.timeline.find(
+      (event) =>
+        event.type === "resource" &&
+        event.resource?.resourceId === "raiden-resolve" &&
+        event.resource.kind === "gain",
+    )?.resource?.amount).toBeCloseTo(1, 8);
+  });
+
   it("applies the generated +3 burst talent row at C3", () => {
     const run = (constellationLevel: number) => {
       const raiden = createRaidenShogunDefinition(constellationLevel);

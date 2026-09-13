@@ -1,4 +1,5 @@
 import type { SimulationResult } from "@/types";
+import { isReactionDamageAbilityId } from "@/lib/reactionLabel";
 
 interface Props {
   result: Pick<SimulationResult, "timeline" | "damageByAbility" | "damageByCharacter" | "damageByElement">;
@@ -8,7 +9,10 @@ interface Props {
 export function EvidenceSummary({ result }: Props) {
   const damageEvents = result.timeline.filter((event) => event.type === "damage" && event.damage !== undefined).length;
   const reactionEvents = result.timeline.filter(
-    (event) => event.type === "damage" && event.damage?.abilityId.includes(":")
+    (event) =>
+      event.type === "damage" &&
+      event.damage !== undefined &&
+      isReactionDamageAbilityId(event.damage.abilityId),
   ).length;
 
   return (

@@ -1,4 +1,4 @@
-import type { Stats } from "@/types";
+import type { AbilityDefinition, Stats } from "@/types";
 import type {
   ActiveBuff,
   BaseStatValues,
@@ -163,4 +163,24 @@ export function applyActiveConversions(
   }
 
   return applyStatConversions(stats, activeConversions, baseValues);
+}
+
+/** Apply ability-cost-derived damage bonuses after ordinary stat conversions. */
+export function applyEnergyCostDmgBonuses(
+  stats: Stats,
+  active: readonly ActiveBuff[],
+  ability: Pick<AbilityDefinition, "damageType" | "energyCost">,
+): Stats {
+  let bonus = 0;
+  const energyCost = Math.max(0, Number.isFinite(ability.energyCost) ? ability.energyCost : 0);
+  for (const { buff, stacks } of active) {
+    const rule = buff.energyCostDmgBonus;
+    if (rule === undefined) continue;
+    if (rule.damageTypes !== undefined && !rule.damageTypes.includes(ability.damageType)) continue;
+    // Talent tables express the per-energy value in percentage points while
+    // Stats.dmgBonus stores a decimal ratio (18% => 0.18).
+    const value = (energyCost * rule.ratio * stacks) / 100;
+    bonus += Math.min(rule.maxCap ?? Number.POSITIVE_INFINITY, Math.max(0, value));
+  }
+  return bonus === 0 ? stats : { ...stats, dmgBonus: stats.dmgBonus + bonus };
 }

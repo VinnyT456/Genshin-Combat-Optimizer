@@ -19,6 +19,9 @@
  */
 export const REACTION_KEY_SEPARATOR = ":";
 
+/** Suffix used for a reaction's independent follow-up damage tick. */
+export const REACTION_TICK_SUFFIX = `${REACTION_KEY_SEPARATOR}tick`;
+
 /** Separator between a reaction name and its trigger, and for row qualifiers. */
 export const QUALIFIER_SEPARATOR = " · ";
 
@@ -63,6 +66,11 @@ export interface ReactionKey {
   readonly reactionKind: string;
 }
 
+/** A reaction damage event that is not caused by a new ability hit. */
+export interface ReactionTickKey {
+  readonly reactionKind: string;
+}
+
 /**
  * Splits a composite reaction ability id, or returns null when the key is not
  * one.
@@ -82,6 +90,26 @@ export function parseReactionKey(abilityId: string): ReactionKey | null {
   const reactionKind = abilityId.slice(at + REACTION_KEY_SEPARATOR.length);
   if (!Object.hasOwn(REACTION_DISPLAY_NAMES, reactionKind)) return null;
   return { triggerAbilityId: abilityId.slice(0, at), reactionKind };
+}
+
+/**
+ * Recognizes the engine's standalone reaction tick ids, such as
+ * `electroCharged:tick`.
+ *
+ * These are deliberately separate from `parseReactionKey`: a tick has no
+ * trigger ability id, but it is still reaction damage and must be counted and
+ * labelled consistently with ordinary transformative reaction events.
+ */
+export function parseReactionTickKey(abilityId: string): ReactionTickKey | null {
+  if (!abilityId.endsWith(REACTION_TICK_SUFFIX)) return null;
+  const reactionKind = abilityId.slice(0, -REACTION_TICK_SUFFIX.length);
+  if (!Object.hasOwn(REACTION_DISPLAY_NAMES, reactionKind)) return null;
+  return { reactionKind };
+}
+
+/** True for both trigger-caused reaction hits and independent reaction ticks. */
+export function isReactionDamageAbilityId(abilityId: string): boolean {
+  return parseReactionKey(abilityId) !== null || parseReactionTickKey(abilityId) !== null;
 }
 
 /**

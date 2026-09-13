@@ -4,6 +4,7 @@ import type { ActiveBuff, Buff, StatConversionModifier } from "@/simulation/buff
 import {
   computeStatConversion,
   applyStatConversions,
+  applyEnergyCostDmgBonuses,
 } from "@/simulation/buffs/conversions";
 import { foldBuffsIntoStats } from "@/simulation/buffs/resolver";
 
@@ -99,6 +100,34 @@ describe("computeStatConversion", () => {
     expect(computeStatConversion(NaN, conversion)).toBe(0);
     expect(computeStatConversion(Number.POSITIVE_INFINITY, conversion)).toBe(0);
     expect(computeStatConversion(-500, conversion)).toBe(0);
+  });
+});
+
+describe("ability-cost damage bonuses", () => {
+  it("converts percentage-point talent values into decimal damage bonuses", () => {
+    const buff: Buff = {
+      id: "burst-cost-bonus",
+      source: "test",
+      startTime: 0,
+      duration: 10,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      energyCostDmgBonus: { ratio: 0.3, damageTypes: ["burst"] },
+    };
+    const active: ActiveBuff[] = [{ buff, stacks: 1 }];
+
+    expect(
+      applyEnergyCostDmgBonuses(createStats(), active, {
+        damageType: "burst",
+        energyCost: 60,
+      }).dmgBonus,
+    ).toBeCloseTo(0.18);
+    expect(
+      applyEnergyCostDmgBonuses(createStats(), active, {
+        damageType: "skill",
+        energyCost: 60,
+      }).dmgBonus,
+    ).toBe(0);
   });
 });
 

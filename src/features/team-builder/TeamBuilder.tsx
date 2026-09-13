@@ -59,7 +59,6 @@ import {
   selectionFor,
 } from "@/features/team-builder/equipmentSelection";
 import {
-  baseBuildArtifactLoadout,
   equippedMatchesBaseBuild,
   recommendedBuildFor,
 } from "@/game-data/characters/recommendedBuilds";
@@ -68,6 +67,10 @@ import { getCharacterMetadata } from "@/features/team-builder/rosterModel";
 import { resolveInitialStatsPreview } from "@/features/team-builder/initialStatsPreview";
 import { countArtifactPiecesWithStats } from "@/features/team-builder/ArtifactStatsEditor";
 import { baseStatsAtLevel } from "@/features/team-builder/characterProgression";
+import {
+  mergeRecommendedBuildEquipment,
+  prepareCharacterWithRecommendedBuild,
+} from "@/features/team-builder/recommendedBuildSelection";
 
 interface Props {
   /** Full roster from game-data. Any length is handled; count is never assumed. */
@@ -140,47 +143,25 @@ export function TeamBuilder({
 
   const handleSelect = useCallback(
     (slotIndex: number, character: CharacterDefinition) => {
-      const meta = getCharacterMetadata(character.id);
-      // A character with a recommended base build gets that build's weapon +
-      // 4pc set + main stats; everyone else keeps the generic weapon-type
-      // default and no artifacts. Keyed by CHARACTER ID, so reordering the
-      // party can never detach a build from its owner. Reuses the existing
-      // equip helpers — no equipment logic is reimplemented here.
-      const baseBuild = recommendedBuildFor(character.id);
-      const buildWeapon =
-        (baseBuild ? findWeapon(baseBuild.weaponId) : undefined) ??
-        getDefaultWeapon(meta.weaponType);
-
-      let nextEquipment = equipWeapon(
-        equipment,
-        character.id,
-        buildWeapon.id,
-        DEFAULT_REFINEMENT,
-        DEFAULT_WEAPON_LEVEL,
-      );
-      if (baseBuild) {
-        nextEquipment = equipArtifactLoadout(
-          nextEquipment,
-          character.id,
-          baseBuildArtifactLoadout(baseBuild),
-        );
-      }
+      const prepared = prepareCharacterWithRecommendedBuild(character);
+      // Picker, preset, URL and initial-team paths share the same resolver:
+      // recommended weapon/set/main stats first, generic weapon fallback only
+      // when no authored baseline exists.
+      const nextEquipment = mergeRecommendedBuildEquipment(equipment, character);
       onEquipmentChange(nextEquipment);
 
-      const characterWithWeapon: CharacterDefinition = {
-        ...character,
-        baseStats: applyWeaponStats(character.baseStats, buildWeapon),
-      };
-      onTeamChange(setSlot(team, slotIndex, characterWithWeapon));
+      onTeamChange(setSlot(team, slotIndex, prepared.character));
 
       // Announce the selection, and when a KQM base build was applied, name the
       // weapon + set that was auto-equipped so a recommended build is never
       // applied silently (screen-reader live region, existing announcement style).
-      const baseSet = baseBuild ? findArtifact(baseBuild.artifactSetId) : null;
-      if (baseBuild && baseSet) {
+      const baseSet = prepared.build
+        ? findArtifact(prepared.build.artifactSetId)
+        : null;
+      if (prepared.build && baseSet) {
         const charZh = charNameZh(character.name) || character.name;
         setAnnouncement(
-          `已为 ${charZh} 应用 KQM 基准配装：武器 ${buildWeapon.nameZh}，圣遗物 ${baseSet.nameZh}（4件套）。`,
+          `已为 ${charZh} 应用 KQM 基准配装：武器 ${prepared.weapon.nameZh}，圣遗物 ${baseSet.nameZh}（4件套）。`,
         );
       } else {
         setAnnouncement(describeSelection(team, slotIndex, character));
@@ -498,7 +479,7 @@ export function TeamBuilder({
             size="sm"
             variant="quiet"
             onClick={() => {
-              const r = roster.find((c) => c.id === "raiden");
+              const r = roster.find((c) => c.id === "raiden-shogun");
               const b = roster.find((c) => c.id === "bennett");
               const xl = roster.find((c) => c.id === "xiangling");
               const xq = roster.find((c) => c.id === "xingqiu");

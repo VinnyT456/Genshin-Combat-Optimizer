@@ -14,6 +14,7 @@
 
 import {
   parseReactionKey,
+  parseReactionTickKey,
   QUALIFIER_SEPARATOR,
 } from "@/lib/reactionLabel";
 import { actionTypeZh, charNameZh, reactionZh } from "@/lib/i18n";
@@ -79,6 +80,10 @@ export function resolveLabel(key: string, labels?: BreakdownLabels): string {
 }
 
 function inferredAbilityLabel(key: string, damageType?: string): string {
+  const reactionTick = parseReactionTickKey(key);
+  if (reactionTick !== null) {
+    return `反应：${reactionZh(reactionTick.reactionKind)}（持续伤害）`;
+  }
   if (damageType !== undefined) {
     const label = actionTypeZh(damageType);
     if (label !== damageType) return label;
@@ -131,6 +136,10 @@ export function resolveAbilityLabel(
   labels?: BreakdownLabels,
 ): string {
   const reaction = parseReactionKey(key);
+  const reactionTick = parseReactionTickKey(key);
+  if (reactionTick !== null) {
+    return reactionZh(reactionTick.reactionKind) + QUALIFIER_SEPARATOR + "持续伤害";
+  }
   if (reaction === null) return resolveLabel(key, labels);
   const trigger = resolveLabel(reaction.triggerAbilityId, labels);
   return (

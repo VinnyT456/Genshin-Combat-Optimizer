@@ -103,6 +103,7 @@ describe("Chinese timeline presentation", () => {
   it("maps engine damage names to Chinese action labels", () => {
     expect(abilityLabelZh("test-pyro-e", "skill")).toBe("元素战技");
     expect(abilityLabelZh("unknown-ability")).toBe("未知动作");
+    expect(abilityLabelZh("electroCharged:tick")).toBe("反应：感电（持续伤害）");
   });
 
   it("constructs descriptions without engine English prose", () => {

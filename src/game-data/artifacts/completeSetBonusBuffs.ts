@@ -318,7 +318,7 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
     case "shimenawas-reminiscence-4pc":
       return [resourceGatedDamage(effectId, source, 0.5, "artifact:shimenawa", ["normal", "charged", "plunge"])];
     case "emblem-of-severed-fate-4pc":
-      return [makeBuff(effectId, source, [], undefined, "active", [{
+      return [makeBuff(effectId, source, [], { damageTypes: ["burst"] }, "active", [{
         sourceStat: "energyRecharge",
         targetStat: "dmgBonus",
         ratio: 0.25,

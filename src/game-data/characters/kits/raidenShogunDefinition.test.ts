@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   RAIDEN_SHOGUN_KIT_METADATA,
   createRaidenShogunDefinition,
+  raidenArtifactStateEffects,
 } from "./raidenShogunDefinition";
 
 describe("Raiden Shogun generic kit data", () => {
@@ -63,5 +64,27 @@ describe("Raiden Shogun generic kit data", () => {
     expect(raiden.skill.triggers?.[0]?.ability?.instances[0]?.id).toBe(
       "raiden-shogun-skill-2",
     );
+  });
+
+  it("carries the sourced Eye, particle, and Energy rules at talent level", () => {
+    const raiden = createRaidenShogunDefinition(0, { normal: 10, skill: 9, burst: 9 });
+
+    expect(raiden.skill.particles).toBeUndefined();
+    expect(raiden.skill.buffs?.[0]).toMatchObject({
+      targets: { scope: "party" },
+      energyCostDmgBonus: { ratio: 0.3, damageTypes: ["burst"] },
+    });
+    expect(raiden.skill.triggers?.[0]?.ability?.particles).toEqual({
+      count: 0.5,
+      element: "electro",
+    });
+    expect(raiden.resources[0]).toMatchObject({
+      gainOnParticlePickup: { amount: 2, cooldownSeconds: 3 },
+    });
+    expect(raidenArtifactStateEffects(raiden.id, 0, 9, 6)[0]).toMatchObject({
+      kind: "partyEnergyOnHit",
+      amount: 2.4,
+      energyRechargeScaling: { threshold: 1, ratio: 0.6 },
+    });
   });
 });

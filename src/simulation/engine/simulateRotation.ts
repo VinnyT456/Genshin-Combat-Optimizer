@@ -21,6 +21,7 @@ import type {
   HealingEvent,
   PickupEvent,
   ResourceEvent,
+  ParticleEmission,
 } from "@/types";
 import { CONFIG_WARNING_ACTION_INDEX, impliedBaseStats, withBaseStats } from "@/types";
 import { computeDamage } from "@/simulation/damage/pipeline";
@@ -515,6 +516,12 @@ function evaluateTriggers(
   tickQueue: ReactionTickQueue,
   runtimeBuffs: Buff[],
   activeCharacterId?: string,
+  onParticleEmission?: (
+    sourceCharacterId: string,
+    timestamp: number,
+    ability: KitAbility,
+    emission: ParticleEmission,
+  ) => void,
 ): number {
   let totalDamage = 0;
   for (const entry of activeTriggers) {
@@ -591,7 +598,9 @@ function evaluateTriggers(
           scaling: "atk",
           castTime: 0,
           cooldown: 0,
-          energyCost: 0,
+          energyCost: hit.damageType === "burst"
+            ? sourceDef.elementalBurst.energyCost
+            : 0,
           energyGenerated: 0,
         },
         activeCharacterId,
@@ -697,6 +706,14 @@ function evaluateTriggers(
     for (const buff of entry.trigger.buffs ?? []) {
       runtimeBuffs.push(
         materializeRuntimeBuff(buff, sourceState, config, currentTime),
+      );
+    }
+    if (procAbility.particles !== undefined) {
+      onParticleEmission?.(
+        sourceDef.id,
+        currentTime,
+        procAbility,
+        procAbility.particles,
       );
     }
   }
@@ -1129,6 +1146,8 @@ export function simulateRotation(
           tickQueue,
           runtimeBuffs,
           activeCharacterId,
+          (sourceCharacterId, timestamp, ability) =>
+            processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
         ));
         // Expired or capped entries are removed below; make sure malformed
         // declarations cannot trap this loop at one timestamp.
@@ -1338,6 +1357,59 @@ export function simulateRotation(
     }
   }
 
+  function triggerPartyEnergyOnHit(
+    sourceCharacterId: string,
+    timestamp: number,
+    damageType: DamageType,
+    element: CharacterDefinition["element"],
+    actionType: ActionType,
+    sourceStats: Stats,
+  ): void {
+    const source = states.get(sourceCharacterId);
+    for (const effect of artifactStateEffects) {
+      if (effect.kind !== "partyEnergyOnHit" || effect.sourceCharacterId !== sourceCharacterId) continue;
+      if (effect.damageTypes !== undefined && !effect.damageTypes.includes(damageType)) continue;
+      if (effect.actionTypes !== undefined && !effect.actionTypes.includes(actionType)) continue;
+      if (effect.elements !== undefined && !effect.elements.includes(element)) continue;
+      if (effect.requiresStanceId !== undefined) {
+        const activeStance = source === undefined ? undefined : getTypedStance(source);
+        if (
+          activeStance === undefined ||
+          activeStance.stance.id !== effect.requiresStanceId ||
+          timestamp >= activeStance.startTime + activeStance.stance.durationSeconds
+        ) continue;
+      }
+      const key = `${effect.kind}:${effect.sourceCharacterId}`;
+      const last = lastArtifactTrigger.get(key) ?? -Infinity;
+      if (timestamp - last < Math.max(0, effect.cooldownSeconds)) continue;
+      const count = artifactTriggerCounts.get(key) ?? 0;
+      if (effect.maxTriggers !== undefined && count >= Math.max(0, effect.maxTriggers)) continue;
+
+      const scaling = effect.energyRechargeScaling;
+      const rechargeBonus = scaling === undefined
+        ? 0
+        : Math.max(0, sourceStats.energyRecharge - scaling.threshold) * scaling.ratio;
+      const amount = effect.amount * (1 + rechargeBonus);
+      if (!(amount > 0) || !Number.isFinite(amount)) continue;
+
+      for (const recipient of party) {
+        if (effect.excludeSource && recipient.definition.id === sourceCharacterId) continue;
+        const applied = gainEnergyWithModifier(recipient.energy, amount, config.energyGainModifier);
+        if (applied <= 0) continue;
+        timeline.push({
+          timestamp,
+          type: "energy",
+          characterId: recipient.definition.id,
+          description: `${recipient.definition.name} gains ${applied.toFixed(2)} energy from ${source?.definition.name ?? sourceCharacterId}`,
+          energy: recipient.energy.current,
+          energyByCharacter: energyByCharacter(states),
+        });
+      }
+      lastArtifactTrigger.set(key, timestamp);
+      artifactTriggerCounts.set(key, count + 1);
+    }
+  }
+
   function pushHealingEvent(event: HealingEvent): void {
     const safeAmount = Math.max(0, Number.isFinite(event.amount) ? event.amount : 0);
     const targetCharacterId = event.targetCharacterId ?? event.sourceCharacterId;
@@ -1396,6 +1468,9 @@ export function simulateRotation(
     while (pickupIndex < pickupEvents.length && pickupEvents[pickupIndex]!.timestamp <= until) {
       const event = pickupEvents[pickupIndex++]!;
       timeline.push(pickupEventRecord(event));
+      if (event.kind === "particle" || event.kind === "orb") {
+        triggerParticleResourceGains(event.sourceCharacterId, event.timestamp, event.amount ?? 1);
+      }
       for (const effect of artifactStateEffects) {
         if (effect.kind === "healOnPickup" &&
             (effect.pickupKind === event.kind ||
@@ -1643,6 +1718,122 @@ export function simulateRotation(
     }
   }
 
+  /** Apply deterministic particle-triggered resource gains, such as Raiden A1. */
+  function triggerParticleResourceGains(
+    particleSourceCharacterId: string,
+    timestamp: number,
+    expectedParticleCount = 1,
+  ): void {
+    const count = Math.max(0, Number.isFinite(expectedParticleCount) ? expectedParticleCount : 0);
+    if (count === 0) return;
+    for (const recipient of party) {
+      const generic = recipient.genericDefinition as GenericCharacterDefinition;
+      for (const definition of generic.resources) {
+        const rule = definition.gainOnParticlePickup;
+        if (rule === undefined) continue;
+        const key = `resourceOnParticlePickup:${recipient.definition.id}:${definition.id}`;
+        const last = lastArtifactTrigger.get(key) ?? -Infinity;
+        if (timestamp - last < Math.max(0, rule.cooldownSeconds)) continue;
+        const current = recipient.resources?.[definition.id];
+        if (current === undefined) continue;
+        const gain = rule.amount * count;
+        if (!(gain > 0) || !Number.isFinite(gain)) continue;
+        const next = applyStateEffect(current, {
+          resourceId: definition.id,
+          kind: "gain",
+          amount: gain,
+        }, timestamp);
+        recipient.resources = {
+          ...(recipient.resources ?? {}),
+          [definition.id]: next,
+        };
+        lastArtifactTrigger.set(key, timestamp);
+        timeline.push(resourceEventRecord({
+          timestamp,
+          sourceCharacterId: particleSourceCharacterId,
+          targetCharacterId: recipient.definition.id,
+          resourceId: definition.id,
+          kind: "gain",
+          amount: gain,
+          value: next.value,
+        }));
+      }
+    }
+  }
+
+  function processParticleEmission(
+    sourceCharacterId: string,
+    timestamp: number,
+    ability: KitAbility,
+    collectorCharacterId?: string,
+  ): void {
+    const source = states.get(sourceCharacterId);
+    if (!source || ability.particles === undefined) return;
+    const particleAbility = {
+      id: ability.id,
+      name: ability.name,
+      actionType: ability.slot,
+      element: ability.instances[0]?.element ?? source.definition.element,
+      damageType: ability.instances[0]?.damageType ?? "skill",
+      multiplier: 0,
+      scaling: "atk" as const,
+      castTime: ability.castTime,
+      cooldown: 0,
+      energyCost: ability.energyCost,
+      energyGenerated: ability.energyGenerated ?? 0,
+      particles: ability.particles,
+    };
+    const energyRechargeFor = makeEnergyRechargeResolver({
+      time: timestamp,
+      ability: particleAbility,
+      activeCharacterId: collectorCharacterId,
+      snapshot: snapshot(
+        states,
+        timestamp,
+        collectorCharacterId,
+        activeTriggers,
+        activeInfusions,
+        tickQueue,
+        enemyAuras,
+        undefined,
+        normalizedHealingEvents,
+        runtimeBuffs,
+        artifactTriggerState(),
+      ),
+      enemy,
+      resolver: runtimeConfig().buffResolver,
+    });
+    const gains = distributeParticles({
+      emission: ability.particles,
+      party,
+      activeCharacterId: collectorCharacterId,
+      partySize,
+      ...(energyRechargeFor !== undefined ? { energyRechargeFor } : {}),
+    });
+    triggerParticleArtifactEffects(sourceCharacterId, timestamp);
+    triggerParticleResourceGains(sourceCharacterId, timestamp, ability.particles.count);
+    for (const gain of gains) {
+      const receiver = states.get(gain.characterId)!;
+      const applied = gainEnergyWithModifier(
+        receiver.energy,
+        gain.amount,
+        config.energyGainModifier,
+      );
+      if (applied <= 0) continue;
+      timeline.push({
+        timestamp,
+        type: "energy",
+        characterId: receiver.definition.id,
+        description:
+          `${receiver.definition.name} gains ${applied.toFixed(2)} energy ` +
+          `from ${source.definition.name} ${ability.name} particles ` +
+          `(${gain.onField ? "on-field" : "off-field"})`,
+        energy: receiver.energy.current,
+        energyByCharacter: energyByCharacter(states),
+      });
+    }
+  }
+
   // Resume seeds the clock and the on-field character; both default to a
   // cold start (t=0, nobody on-field) when no snapshot was supplied.
   let clock = resumedFromTime ?? 0;
@@ -1882,6 +2073,8 @@ export function simulateRotation(
         tickQueue,
         runtimeBuffs,
         activeCharacterId,
+        (sourceCharacterId, timestamp, ability) =>
+          processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
       ));
     }
 
@@ -1993,7 +2186,9 @@ export function simulateRotation(
           scaling: "atk",
           castTime: 0,
           cooldown: 0,
-          energyCost: 0,
+          energyCost: effectiveDamageType === "burst"
+            ? def.elementalBurst.energyCost
+            : ability.energyCost,
           energyGenerated: 0,
         },
         activeCharacterId,
@@ -2110,6 +2305,8 @@ export function simulateRotation(
         tickQueue,
         runtimeBuffs,
         activeCharacterId,
+        (sourceCharacterId, timestamp, ability) =>
+          processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
       ));
       triggerArtifactResources(
         "damageDealt",
@@ -2121,6 +2318,14 @@ export function simulateRotation(
         action.actionType,
       );
       triggerCooldownReductionOnHit(def.id, hit.timestamp, effectiveDamageType, effectiveElement, action.actionType);
+      triggerPartyEnergyOnHit(
+        def.id,
+        hit.timestamp,
+        effectiveDamageType,
+        effectiveElement,
+        action.actionType,
+        stats,
+      );
       const reactionKinds = reaction.reactionKinds ?? [];
       if (reactionKinds.length > 0) {
         // Generic reaction-triggered sets (Instructor, Flower, etc.) receive
@@ -2175,58 +2380,7 @@ export function simulateRotation(
 
     // ---- Energy generation ------------------------------------------------
     if (ability.particles !== undefined) {
-      const energyRechargeFor = makeEnergyRechargeResolver({
-        time: clock,
-        ability: {
-          id: ability.id,
-          name: ability.name,
-          actionType: action.actionType,
-          element: ability.instances[0]?.element ?? def.element,
-          damageType: ability.instances[0]?.damageType ?? "skill",
-          multiplier: 0,
-          scaling: "atk",
-          castTime: ability.castTime,
-          cooldown: 0,
-          energyCost: ability.energyCost,
-          energyGenerated: ability.energyGenerated ?? 0,
-          particles: ability.particles,
-        },
-        activeCharacterId,
-        snapshot: castSnapshot,
-        enemy,
-        resolver: runtimeConfig().buffResolver,
-      });
-
-      const gains = distributeParticles({
-        emission: ability.particles,
-        party,
-        activeCharacterId,
-        partySize,
-        ...(energyRechargeFor !== undefined ? { energyRechargeFor } : {}),
-      });
-
-      triggerParticleArtifactEffects(def.id, clock);
-
-      for (const gain of gains) {
-        const receiver = states.get(gain.characterId)!;
-        const applied = gainEnergyWithModifier(
-          receiver.energy,
-          gain.amount,
-          config.energyGainModifier,
-        );
-        if (applied <= 0) continue;
-        timeline.push({
-          timestamp: clock,
-          type: "energy",
-          characterId: gain.characterId,
-          description:
-            `${receiver.definition.name} gains ${applied.toFixed(2)} energy ` +
-            `from ${def.name} ${ability.name} particles ` +
-            `(${gain.onField ? "on-field" : "off-field"})`,
-          energy: receiver.energy.current,
-          energyByCharacter: energyByCharacter(states),
-        });
-      }
+      processParticleEmission(def.id, clock, ability, activeCharacterId);
     }
 
     if (ability.energyGenerated && ability.energyGenerated > 0) {
