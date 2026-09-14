@@ -11,7 +11,6 @@ import { cn } from "@/components/ui/cn";
 import {
   FOCUS_RING,
   STATE_CHIP,
-  STATE_GLYPH,
   TRANSITION_COLORS,
 } from "@/components/ui/tokens";
 import { getCharacterKitDetails } from "@/game-data/characters/kits/raidenNationalKit";
@@ -971,9 +970,6 @@ function CharacterStatsModalInner({
                 STATE_CHIP.warning,
               )}
             >
-              <span aria-hidden="true" className="mt-0.5">
-                {STATE_GLYPH.warning}
-              </span>
               <p className="leading-relaxed">
                 {constellationsSimulated
                   ? "仅已建模且达到所选命座层数的效果参与计算；其余效果暂不计入。"

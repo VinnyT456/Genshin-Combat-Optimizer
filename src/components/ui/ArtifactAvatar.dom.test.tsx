@@ -58,6 +58,15 @@ describe("ArtifactAvatar renders an icon", () => {
     expect(img?.getAttribute("width")).toBe("36");
     expect(img?.getAttribute("height")).toBe("36");
   });
+
+  it("uses the selected piece image instead of the set thumbnail", () => {
+    render(<ArtifactAvatar iconId={ICON_ID} nameZh={`${NAME_ZH} · 死之羽`} slot="plume" size="lg" />);
+    const img = renderedImage();
+    expect(img?.getAttribute("src")).toContain("UI_RelicIcon_15025_2.webp");
+    expect(img?.getAttribute("src")).not.toContain("UI_RelicIcon_15025_4.webp");
+    expect(img?.getAttribute("width")).toBe("96");
+    expect(img?.getAttribute("height")).toBe("96");
+  });
 });
 
 describe("ArtifactAvatar failure path", () => {

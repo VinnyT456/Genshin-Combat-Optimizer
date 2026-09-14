@@ -4,6 +4,7 @@ import {
   ARTIFACT_CDN_HOST,
   ARTIFACT_FALLBACK_CDN_HOST,
   getArtifactIconSources,
+  getArtifactIconSourcesForSlot,
   getArtifactInitial,
 } from "./artifactAssets";
 
@@ -54,6 +55,33 @@ describe("getArtifactInitial", () => {
   it("never returns an empty string", () => {
     expect(getArtifactInitial("")).toBe("?");
     expect(getArtifactInitial("   ")).toBe("?");
+  });
+});
+
+describe("getArtifactIconSourcesForSlot", () => {
+  it("uses the published suffix for every artifact slot", () => {
+    const expectedSuffixes = {
+      goblet: 1,
+      plume: 2,
+      circlet: 3,
+      flower: 4,
+      sands: 5,
+    } as const;
+
+    for (const [slot, suffix] of Object.entries(expectedSuffixes)) {
+      const sources = getArtifactIconSourcesForSlot(
+        "UI_RelicIcon_15025_4",
+        slot as keyof typeof expectedSuffixes,
+      );
+      expect(sources[0]).toContain(`UI_RelicIcon_15025_${suffix}.webp`);
+      expect(sources[1]).toContain(`UI_RelicIcon_15025_${suffix}.png`);
+    }
+  });
+
+  it("keeps the published set icon as a fallback for one-piece sets", () => {
+    const sources = getArtifactIconSourcesForSlot("UI_RelicIcon_15009_3", "flower");
+    expect(sources.some((source) => source.includes("UI_RelicIcon_15009_4.webp"))).toBe(true);
+    expect(sources.some((source) => source.includes("UI_RelicIcon_15009_3.webp"))).toBe(true);
   });
 });
 

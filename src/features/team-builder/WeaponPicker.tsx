@@ -389,7 +389,6 @@ export function WeaponPicker({
                     <div className="mt-auto flex items-center justify-between border-t border-surface-border/50 pt-2 text-xs">
                       {isEquipped ? (
                         <span className="font-semibold text-amber-400 flex items-center gap-1">
-                          <span>✓</span>
                           <span>当前装备</span>
                       </span>
                     ) : (

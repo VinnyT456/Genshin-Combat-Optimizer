@@ -229,8 +229,7 @@ export function RotationTimeline({
       </div>
 
       {!hasEvents && (
-        <p className={cn("rounded-md border px-3 py-2 text-sm font-mono", STATE_CHIP.info)}>
-          <span aria-hidden="true">◇ </span>
+        <p className={cn("rounded-sm border px-3 py-2 text-sm font-mono", STATE_CHIP.info)}>
           未执行任何动作。请检查输出循环动作引用的角色是否存在于当前出战队伍中。
         </p>
       )}

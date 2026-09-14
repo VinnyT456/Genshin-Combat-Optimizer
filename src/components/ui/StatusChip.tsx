@@ -1,21 +1,19 @@
 import type { ReactNode } from "react";
 import { cn } from "@/components/ui/cn";
-import { STATE_CHIP, STATE_GLYPH, type SemanticState } from "@/components/ui/tokens";
+import { STATE_CHIP, type SemanticState } from "@/components/ui/tokens";
 
 interface Props {
   state: SemanticState;
   children: ReactNode;
-  /** Set false for chips whose meaning is already fully carried by the label. */
-  showGlyph?: boolean;
   className?: string;
   title?: string;
 }
 
 /**
- * Semantic state chip. The glyph is decorative and `aria-hidden`; the text
- * label always carries the meaning, so status is never colour-only.
+ * Semantic state chip. The text label carries the meaning without decorative
+ * emoji or glyphs.
  */
-export function StatusChip({ state, children, showGlyph = true, className, title }: Props) {
+export function StatusChip({ state, children, className, title }: Props) {
   return (
     <span
       title={title}
@@ -25,7 +23,6 @@ export function StatusChip({ state, children, showGlyph = true, className, title
         className,
       )}
     >
-      {showGlyph && <span aria-hidden="true">{STATE_GLYPH[state]}</span>}
       <span>{children}</span>
     </span>
   );

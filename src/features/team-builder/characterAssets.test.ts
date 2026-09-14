@@ -34,6 +34,7 @@ describe("resolveAssetName", () => {
     expect(resolveAssetName("hu-tao", "Hu Tao")).toBe("Hutao");
     expect(resolveAssetName("kamisato-ayaka", "Kamisato Ayaka")).toBe("Ayaka");
     expect(resolveAssetName("kirara", "Kirara")).toBe("Momoka");
+    expect(resolveAssetName("skirk", "Skirk")).toBe("SkirkNew");
   });
 
   it("collapses Traveler forms onto one portrait PER GENDER", () => {
@@ -50,7 +51,6 @@ describe("resolveAssetName", () => {
   });
 
   it("returns null for characters with no published icon", () => {
-    expect(resolveAssetName("skirk", "Skirk")).toBeNull();
     expect(resolveAssetName("sandrone", "Sandrone")).toBeNull();
   });
 
@@ -73,7 +73,13 @@ describe("getAvatarSources", () => {
   it("yields no URL at all when the icon is known to be absent", () => {
     // Requesting a URL that is known to 404 would flash a broken image; the
     // placeholder must render immediately instead.
-    expect(getAvatarSources("skirk", "Skirk")).toEqual({ primary: null, fallback: null });
+    expect(getAvatarSources("sandrone", "Sandrone")).toEqual({ primary: null, fallback: null });
+  });
+
+  it("uses Skirk's published internal codename", () => {
+    expect(getAvatarSources("skirk", "Skirk").primary).toContain(
+      "UI_AvatarIcon_SkirkNew.webp",
+    );
   });
 
   it("uses the override in the built URL, not the display name", () => {

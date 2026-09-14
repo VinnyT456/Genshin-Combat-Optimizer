@@ -13,21 +13,21 @@ interface Props {
 // rule; UI-AUDIT-055 F7).
 const STATUS_THEMES = {
   success: {
-    border: "border-emerald-500/30 hover:border-emerald-500/60",
-    bg: "bg-gradient-to-br from-emerald-950/20 via-surface-raised to-surface-raised",
-    badge: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
+    border: "border-surface-border hover:border-emerald-500/60",
+    accent: "border-l-emerald-400",
+    badge: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
     dot: "bg-emerald-400",
   },
   warning: {
-    border: "border-amber-500/30 hover:border-amber-500/60",
-    bg: "bg-gradient-to-br from-amber-950/20 via-surface-raised to-surface-raised",
-    badge: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+    border: "border-surface-border hover:border-amber-500/60",
+    accent: "border-l-amber-400",
+    badge: "border-amber-500/40 bg-amber-500/10 text-amber-300",
     dot: "bg-amber-400",
   },
   info: {
-    border: "border-sky-500/30 hover:border-sky-500/60",
-    bg: "bg-gradient-to-br from-sky-950/20 via-surface-raised to-surface-raised",
-    badge: "border-sky-500/40 bg-sky-500/15 text-sky-300",
+    border: "border-surface-border hover:border-sky-500/60",
+    accent: "border-l-sky-400",
+    badge: "border-sky-500/40 bg-sky-500/10 text-sky-300",
     dot: "bg-sky-400",
   },
 } as const;
@@ -51,9 +51,9 @@ export function InsightsPanel({ insights }: Props) {
             <div
               key={insight.id}
               className={cn(
-                "relative flex flex-col justify-between rounded-xl border p-5 shadow-sm transition-colors duration-150",
+                "relative flex flex-col justify-between border border-l-2 bg-surface-raised p-4 transition-colors duration-150",
                 theme.border,
-                theme.bg,
+                theme.accent,
               )}
             >
               <div>
@@ -61,17 +61,17 @@ export function InsightsPanel({ insights }: Props) {
                 <div className="mb-2.5">
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
+                      "inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-xs font-medium",
                       theme.badge,
                     )}
                   >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", theme.dot)} />
+                    <span aria-hidden="true" className={cn("h-1.5 w-1.5", theme.dot)} />
                     {insight.badge}
                   </span>
                 </div>
 
                 {/* Title */}
-                <h4 className="text-sm sm:text-base font-semibold text-slate-100 leading-snug">
+                <h4 className="text-balance text-sm font-semibold leading-snug text-slate-100 sm:text-base">
                   {insight.title}
                 </h4>
 
@@ -82,8 +82,8 @@ export function InsightsPanel({ insights }: Props) {
               </div>
 
               {/* Actionable detail / advice box */}
-              <div className="mt-3.5 rounded-md border border-surface-border/60 bg-surface/50 p-3 text-xs text-slate-300 leading-relaxed">
-                <span className="font-semibold text-amber-400">优化建议: </span>
+              <div className="mt-3 border-t border-surface-border/70 pt-3 text-xs leading-relaxed text-slate-300">
+                <span className="font-semibold text-cyan-300">优化建议： </span>
                 {insight.detail}
               </div>
             </div>

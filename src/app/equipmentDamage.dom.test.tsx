@@ -148,7 +148,10 @@ async function equipArtifactAt(nameZh: string, pieces: number) {
   const slots = ["生之花", "死之羽", "时之沙", "空之杯", "理之冠"];
   for (const slot of slots.slice(0, pieces)) {
     await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`${slot}，`) }));
+      // The redesigned picker also exposes the inventory card's destination
+      // in its accessible name. Anchor the slot control at the start so a
+      // selected inventory card cannot make this query ambiguous.
+      fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`^${slot}，`) }));
     });
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`将${nameZh}`) }));
@@ -353,7 +356,10 @@ describe("equipping an artifact set changes the damage the dashboard shows", () 
     await equipArtifactAt(set.nameZh, 4);
 
     const slot = screen.getByLabelText(/^1 号位：/).closest("div") as HTMLElement;
-    expect(within(slot).getByText("4件")).toBeInTheDocument();
+    // The default recommended build may keep the fifth off-piece, in which
+    // case the mixed-loadout summary is the truthful `4+1` rather than a
+    // misleading homogeneous `4件` label.
+    expect(within(slot).getByText(/^(?:4件|4\+1)$/)).toBeInTheDocument();
   });
 });
 

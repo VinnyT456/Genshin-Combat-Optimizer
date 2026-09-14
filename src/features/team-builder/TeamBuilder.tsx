@@ -318,9 +318,8 @@ export function TeamBuilder({
     return (
       <div
         role="alert"
-        className={cn("rounded-md border p-4 text-sm", STATE_CHIP.error)}
+        className={cn("rounded-sm border p-4 text-sm", STATE_CHIP.error)}
       >
-        <span aria-hidden="true">✕ </span>
         {rosterError} 请刷新页面重试。
       </div>
     );
@@ -330,7 +329,7 @@ export function TeamBuilder({
     <div className="space-y-3">
       {/* Active Elemental Resonances */}
       {resonances.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-2 text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-2 rounded-sm border border-surface-border bg-surface px-3 py-2 text-xs font-mono">
           <span className="font-semibold text-slate-300">队伍元素共鸣:</span>
           {resonances.map((r) => (
             <div
@@ -338,7 +337,7 @@ export function TeamBuilder({
               className="flex items-center gap-1.5 rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-1"
               title={resonanceFullDescZh(r.name) || r.fullDesc}
             >
-              <span className="font-medium text-amber-400">✦ {resonanceNameZh(r.name)}</span>
+              <span className="font-medium text-amber-400">{resonanceNameZh(r.name)}</span>
               <span className="text-slate-300">({resonanceShortDescZh(r.name) || r.shortDesc})</span>
             </div>
           ))}
@@ -466,8 +465,7 @@ export function TeamBuilder({
       </ul>
 
       {orphanedActionCount > 0 && (
-        <p className={cn("rounded-md border px-3 py-2 text-xs", STATE_CHIP.warning)}>
-          <span aria-hidden="true">⚠ </span>
+        <p className={cn("rounded-sm border px-3 py-2 text-xs", STATE_CHIP.warning)}>
           {orphanedActionCount} 个循环动作引用了已被移除的角色。
         </p>
       )}

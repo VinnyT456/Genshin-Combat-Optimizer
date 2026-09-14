@@ -13,7 +13,7 @@ import type { Element } from "@/types";
 //      the display name ("Amber" -> Ambor, "Jean" -> Qin, "Noelle" -> Noel,
 //      "Raiden Shogun" -> Shougun), plus the Traveler, whose forms share one
 //      portrait PER GENDER rather than per element.
-//   3. 2 entries — no icon published on ANY known CDN (see MISSING_ICON_IDS).
+//   3. 1 entry — no icon published on ANY known CDN (see MISSING_ICON_IDS).
 //
 // A naive derive-from-name mapping was measured broken for ~30% of the roster,
 // so derivation alone cannot be correct. Every override below was verified with
@@ -60,6 +60,9 @@ const ASSET_NAME_OVERRIDES: Readonly<Record<string, string>> = {
   "yun-jin": "Yunjin",
   "lan-yan": "Lanyan",
   "yumemizuki-mizuki": "Mizuki",
+  // Project Amber's current internal asset codename includes the `New`
+  // suffix; the plain `Skirk` URL is not published by the asset CDN.
+  skirk: "SkirkNew",
 
   // Family-name characters: the asset drops the surname.
   "kamisato-ayaka": "Ayaka",
@@ -92,7 +95,7 @@ const ASSET_NAME_OVERRIDES: Readonly<Record<string, string>> = {
  * URL at all so the UI renders its placeholder immediately, instead of firing a
  * request that is known to 404 and flashing a broken image.
  */
-export const MISSING_ICON_IDS: ReadonlySet<string> = new Set(["skirk", "sandrone"]);
+export const MISSING_ICON_IDS: ReadonlySet<string> = new Set(["sandrone"]);
 
 /**
  * Derives the asset codename for a character whose name maps directly: strip

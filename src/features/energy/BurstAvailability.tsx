@@ -1,5 +1,5 @@
 import { cn } from "@/components/ui/cn";
-import { STATE_CHIP, STATE_GLYPH, type SemanticState } from "@/components/ui/tokens";
+import { STATE_CHIP, type SemanticState } from "@/components/ui/tokens";
 import { formatEnergy } from "@/lib/energyFormat";
 import type { BurstAvailability as Availability } from "@/features/energy/energyModel";
 
@@ -43,7 +43,6 @@ export function BurstAvailabilityChip({
         STATE_CHIP[chip.state],
       )}
     >
-      <span aria-hidden="true">{STATE_GLYPH[chip.state]}</span>
       {chip.text}
     </span>
   );

@@ -70,7 +70,7 @@ export function TimelineList({
               {isSwap ? (
                 <span className="min-w-0 flex-1 text-sm text-slate-300">
                   <span aria-hidden="true">⇄ </span>
-                  切人 {from === null ? "" : `${from} → `}
+                  切人 {from === null ? "" : `至 ${from} `}
                   {actorName}
                   {event.duration !== undefined && (
                     <span className="ml-2 font-mono text-micro text-slate-400">

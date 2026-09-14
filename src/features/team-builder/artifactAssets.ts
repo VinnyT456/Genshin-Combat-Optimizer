@@ -5,11 +5,13 @@
 // generated data carries Project Amber's own `iconId` on every one of the 63
 // sets, so there is nothing to derive and nothing to guess.
 //
-// WHICH SLOT REPRESENTS A SET (deliberate decision, per the task).
+// SET THUMBNAIL VS. PIECE PREVIEW.
 // Artifact icons are published per PIECE, with a `_1`..`_5` suffix on a shared
-// set id. The set-level icon is therefore a choice of slot. This module does
-// NOT choose one: it uses the `iconId` verbatim, because the data already
-// carries the right suffix per set and rewriting it would be wrong.
+// set id. Set-library cards use the generated `iconId` verbatim: it is the
+// published set thumbnail and is `_4` for almost every normal set. Detailed
+// previews call `getArtifactIconSourcesForSlot`, which uses the explicit
+// piece mapping below so the image matches the selected flower, plume, sands,
+// goblet or circlet.
 //
 // Measured against the live CDN across all 63 sets:
 //   - 59 sets carry `_4` (the Flower of Life). All five suffixes resolve.
@@ -34,6 +36,8 @@
 // ignores it rather than routing a known-404 into an <img>.
 // ---------------------------------------------------------------------------
 
+import type { ArtifactSlot } from "@/simulation/character/equipment";
+
 /** Host serving the primary artifact icons. Mirrored in `next.config.mjs`. */
 export const ARTIFACT_CDN_HOST = "api.lunaris.moe";
 /** Host serving the fallback artifact icons. Mirrored in `next.config.mjs`. */
@@ -48,6 +52,18 @@ const FALLBACK_BASE = `https://${ARTIFACT_FALLBACK_CDN_HOST}/assets/UI/reliquary
  * as absent rather than sent to the network as a guess.
  */
 const ICON_ID_PATTERN = /^UI_RelicIcon_\d+_[1-5]$/;
+
+/**
+ * Project Amber's piece suffixes, confirmed from each set's cached `suit` data:
+ * 1=goblet, 2=plume, 3=circlet, 4=flower, 5=sands.
+ */
+const SLOT_SUFFIX: Record<ArtifactSlot, 1 | 2 | 3 | 4 | 5> = {
+  sands: 5,
+  goblet: 1,
+  circlet: 3,
+  flower: 4,
+  plume: 2,
+};
 
 export interface ArtifactIconSources {
   /** Primary URL, or `null` when the set carries no usable icon id. */
@@ -75,7 +91,34 @@ export function getArtifactIconSources(iconId: string | undefined): ArtifactIcon
 }
 
 /**
- * Glyph shown when no icon renders. A single character keeps the placeholder
+ * Ordered source chain for a specific artifact piece.
+ *
+ * Most sets expose all five piece icons. A small group of legacy one-piece
+ * sets exposes only its published suffix, so the original set icon is kept as
+ * the final fallback instead of guessing that every suffix exists.
+ */
+export function getArtifactIconSourcesForSlot(
+  iconId: string | undefined,
+  slot: ArtifactSlot,
+): readonly string[] {
+  const setSources = getArtifactIconSources(iconId);
+  if (iconId === undefined || setSources.primary === null || setSources.fallback === null) {
+    return [];
+  }
+
+  const pieceIconId = iconId.replace(/_[1-5]$/, `_${SLOT_SUFFIX[slot]}`);
+  const pieceSources = getArtifactIconSources(pieceIconId);
+  return Array.from(
+    new Set(
+      [pieceSources.primary, pieceSources.fallback, setSources.primary, setSources.fallback].filter(
+        (source): source is string => source !== null,
+      ),
+    ),
+  );
+}
+
+/**
+ * Text shown when no icon renders. A single character keeps the placeholder
  * legible at the 36px size the picker uses, where two characters of a Chinese
  * set name would be unreadable.
  */

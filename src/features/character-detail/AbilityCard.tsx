@@ -130,12 +130,11 @@ export function AbilityCard({
         The constellation boost is stated, never silently folded in. Without
         this the selector reads "等级 7" while the table below and the simulated
         damage are both level 10, and nothing on screen explains the gap.
-        `state.info` is the "neutral notice" role in DESIGN-SYSTEM; the glyph is
-        decorative and the text carries the meaning.
+        `state.info` is the "neutral notice" role in DESIGN-SYSTEM; the text
+        carries the meaning directly.
       */}
       {boosted && (
         <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded border border-state-info-border bg-state-info-bg px-2 py-1 text-micro text-state-info-fg">
-          <span aria-hidden="true">◇</span>
           <span>
             命之座使该天赋等级 +{talentBoost}，实际按等级{" "}
             <span className="font-mono tabular-nums font-semibold">

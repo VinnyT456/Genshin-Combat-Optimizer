@@ -23,7 +23,7 @@ const ACTION_LABELS: Record<ActionType, { short: string; label: string }> = {
   plungeHigh: { short: "下高", label: "高空下落" },
   skill: { short: "E", label: "元素战技" },
   burst: { short: "Q", label: "元素爆发" },
-  swap: { short: "⇄", label: "切换角色" },
+  swap: { short: "换", label: "切换角色" },
 };
 
 /** Keep generated ability ids/names out of the Chinese-first rotation UI. */
@@ -185,7 +185,7 @@ export function RotationEditor({ rotation, onRotationChange, team }: Props) {
                     <span className="text-micro opacity-90">{displayName}</span>
                   </button>
                   {index < rotation.length - 1 && (
-                    <span className="text-micro text-slate-400" aria-hidden="true">→</span>
+                    <span className="px-0.5 text-micro text-slate-600" aria-hidden="true">/</span>
                   )}
                 </div>
               );
@@ -196,7 +196,7 @@ export function RotationEditor({ rotation, onRotationChange, team }: Props) {
 
       {/* Action List */}
       {rotation.length === 0 ? (
-        <div className="rounded-md border border-dashed border-surface-border p-6 text-center text-xs text-slate-400 font-mono">
+        <div className="rounded-sm border border-dashed border-surface-border p-6 text-center text-xs text-slate-400 font-mono">
           <p>当前循环序列为空。请在上方选择预设方案，或点击下方快捷按钮追加动作。</p>
         </div>
       ) : (
@@ -229,7 +229,7 @@ export function RotationEditor({ rotation, onRotationChange, team }: Props) {
               <div
                 key={index}
                 className={cn(
-                  "flex items-center justify-between gap-2 rounded-md border border-surface-border bg-surface px-3 py-1.5 text-xs transition-colors",
+                  "flex items-center justify-between gap-2 rounded-sm border border-surface-border bg-surface px-3 py-1.5 text-xs transition-colors",
                   isOrphaned && "border-amber-500/50 bg-amber-500/5",
                   isHighlighted && "border-amber-400 bg-amber-500/10",
                 )}
@@ -287,40 +287,40 @@ export function RotationEditor({ rotation, onRotationChange, team }: Props) {
                     disabled={index === 0}
                     onClick={() => handleMoveAction(index, -1)}
                     className={cn(
-                      "h-6 w-6 rounded-sm border border-surface-border text-center hover:bg-surface-hover",
+                      "min-h-8 min-w-12 rounded-sm border border-surface-border px-1.5 text-center text-micro hover:bg-surface-hover",
                       TRANSITION_COLORS,
                       FOCUS_RING,
                       DISABLED,
                     )}
                     aria-label={`将第 ${index + 1} 个动作上移`}
                   >
-                    ↑
+                    上移
                   </button>
                   <button
                     type="button"
                     disabled={index === rotation.length - 1}
                     onClick={() => handleMoveAction(index, 1)}
                     className={cn(
-                      "h-6 w-6 rounded-sm border border-surface-border text-center hover:bg-surface-hover",
+                      "min-h-8 min-w-12 rounded-sm border border-surface-border px-1.5 text-center text-micro hover:bg-surface-hover",
                       TRANSITION_COLORS,
                       FOCUS_RING,
                       DISABLED,
                     )}
                     aria-label={`将第 ${index + 1} 个动作下移`}
                   >
-                    ↓
+                    下移
                   </button>
                   <button
                     type="button"
                     onClick={() => handleDeleteAction(index)}
                     className={cn(
-                      "h-6 w-6 rounded-sm border border-surface-border text-center text-slate-400 hover:text-red-400 hover:bg-surface-hover",
+                      "min-h-8 min-w-12 rounded-sm border border-surface-border px-1.5 text-center text-micro text-slate-400 hover:bg-surface-hover hover:text-red-400",
                       TRANSITION_COLORS,
                       FOCUS_RING,
                     )}
                     aria-label={`删除第 ${index + 1} 个动作`}
                   >
-                    ✕
+                    删除
                   </button>
                 </div>
               </div>
@@ -331,7 +331,7 @@ export function RotationEditor({ rotation, onRotationChange, team }: Props) {
 
       {/* Rapid Action Palette */}
       {activeMembers.length > 0 && currentChar && (
-        <div className="rounded-md border border-surface-border bg-surface p-3 space-y-2.5 text-xs">
+        <div className="rounded-sm border border-surface-border bg-surface p-3 space-y-2.5 text-xs">
           <div className="flex items-center justify-between font-mono">
             <span className="font-semibold text-slate-300">快捷追加动作到循环轴:</span>
             <span className="text-micro text-slate-400">点击按钮即可立即追加至轴末尾</span>
@@ -401,7 +401,7 @@ export function RotationEditor({ rotation, onRotationChange, team }: Props) {
               onClick={() => handleQuickAdd("swap")}
               title={`切换至 ${charNameZh(currentChar.name)} 登场`}
             >
-              [⇄] 切人登场
+              [换] 切人登场
             </Button>
           </div>
         </div>

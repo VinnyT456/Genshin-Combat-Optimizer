@@ -160,11 +160,11 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
 
         {/* Enemy mitigation preview — engine formulas via the adapter. */}
         {mitigation === null ? (
-          <p className="rounded-md border border-surface-border bg-surface p-2.5 text-micro text-slate-400">
+          <p className="rounded-sm border border-surface-border bg-surface p-2.5 text-micro text-slate-400">
             添加角色后显示承伤率（防御乘区取决于角色等级）。
           </p>
         ) : (
-          <div className="rounded-md border border-surface-border bg-surface p-2.5 space-y-1.5 text-micro">
+          <div className="rounded-sm border border-surface-border bg-surface p-2.5 space-y-1.5 text-micro">
             <div className="flex items-center justify-between text-slate-300">
               <span>对 {referenceLevel} 级角色综合承伤率:</span>
               <span className="font-mono font-semibold text-amber-400">
@@ -173,7 +173,7 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-raised">
               <div
-                className="h-full bg-gradient-to-r from-amber-500 to-emerald-400"
+                className="h-full bg-cyan-300"
                 style={{
                   width: `${Math.min(100, Math.max(0, mitigation.totalMultiplier * 100))}%`,
                 }}

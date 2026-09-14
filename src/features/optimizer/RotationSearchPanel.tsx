@@ -155,7 +155,7 @@ export function RotationSearchPanel({
               aria-invalid={durationInvalid}
               aria-describedby={durationInvalid ? `${durationId}-error` : undefined}
               className={cn(
-                "min-h-11 w-24 rounded-md border border-surface-border bg-surface px-2 py-1",
+                "min-h-11 w-24 rounded-sm border border-surface-border bg-surface px-2 py-1",
                 durationInvalid && "border-red-400",
                 "font-mono text-sm tabular-nums text-slate-100",
                 "disabled:opacity-60 disabled:cursor-not-allowed",
@@ -201,13 +201,13 @@ export function RotationSearchPanel({
         <h3 id={`${durationId}-status-heading`} className="text-sm font-semibold text-slate-200">搜索状态</h3>
         {phase === "queued" ? <p className="text-sm text-slate-300">正在准备搜索…</p> : phase === "searching" ? <p className="text-sm text-slate-300">{SEARCHING_NOTICE}</p> : phase === "canceling" ? <p className="text-sm text-slate-300">正在取消…</p> : phase === "canceled" ? <p className="text-sm text-slate-300">搜索已取消。当前配置和已有结果均已保留。</p> : phase === "failed" ? <p className="text-sm text-slate-300">搜索未完成。</p> : <p className="text-sm text-slate-400">搜索尚未运行。</p>}
         {searching && <p className="text-xs text-slate-500">{SEARCH_UNSUPPORTED_NOTICE}</p>}
-        {draftChanged && <p className="rounded-md border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-200">当前配置已更改。本次搜索仍使用开始时的配置；结果完成后不会自动应用。</p>}
+        {draftChanged && <p className="rounded-sm border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-200">当前配置已更改。本次搜索仍使用开始时的配置；结果完成后不会自动应用。</p>}
       </div>
 
       {canRestore && (
         <div
           className={cn(
-            "flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-xs",
+            "flex flex-wrap items-center justify-between gap-3 rounded-sm border p-3 text-xs",
             STATE_CHIP.info,
           )}
         >
@@ -223,7 +223,7 @@ export function RotationSearchPanel({
 
       {phase === "empty" && (
         <p
-          className={cn("rounded-xl border p-4 text-sm", STATE_CHIP.warning)}
+          className={cn("rounded-sm border p-4 text-sm", STATE_CHIP.warning)}
           role="status"
         >
           {EMPTY_RESULT_NOTICE}
@@ -255,7 +255,7 @@ export function RotationSearchPanel({
 
       {phase === "results" && outcome !== null && (
         <div className="space-y-3">
-          {draftChanged && <p className="rounded-md border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-200">当前配置已更改；以下候选仍对应开始时的搜索条件。</p>}
+          {draftChanged && <p className="rounded-sm border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-200">当前配置已更改；以下候选仍对应开始时的搜索条件。</p>}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="font-semibold text-slate-300">
               {candidateCountLabel(
@@ -361,7 +361,7 @@ function ChoiceButton({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "min-h-11 min-w-28 rounded-md border px-3 py-1.5 text-left",
+        "min-h-11 min-w-28 rounded-sm border px-3 py-1.5 text-left",
         TRANSITION_COLORS,
         FOCUS_RING,
         "disabled:opacity-60 disabled:cursor-not-allowed",

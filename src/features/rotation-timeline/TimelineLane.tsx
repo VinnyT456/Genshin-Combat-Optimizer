@@ -192,9 +192,7 @@ function SkipButton({ label, leftPercent }: { label: string; leftPercent: number
           STATE_TEXT.warning,
         )}
       >
-        <span aria-hidden="true" className="text-micro">
-          ⚠
-        </span>
+        <span className="text-micro">提示</span>
       </button>
       {expanded && (
         <span

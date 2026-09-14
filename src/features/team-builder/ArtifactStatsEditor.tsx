@@ -253,7 +253,7 @@ export function ArtifactStatsEditor({
   return (
     <section
       aria-label="圣遗物词条"
-      className="space-y-3 rounded-xl border border-surface-border bg-surface/60 p-3"
+      className="space-y-4 border-t border-surface-border/70 pt-4"
     >
       <div>
         <h4 className="text-xs font-semibold text-slate-200">圣遗物词条</h4>
@@ -266,8 +266,8 @@ export function ArtifactStatsEditor({
           const piece = loadout[slot];
           if (!piece) return null;
           return (
-            <fieldset key={slot} className="space-y-1.5 rounded-md border border-surface-border/70 p-2">
-              <legend className="px-1 text-micro font-semibold text-amber-300">{SLOT_LABELS[slot]}</legend>
+            <fieldset key={slot} className="space-y-2 border-b border-surface-border/70 pb-4 last:border-b-0 last:pb-0">
+              <legend className="text-micro font-semibold uppercase tracking-[0.12em] text-amber-300">{SLOT_LABELS[slot]}</legend>
               <StatRow
                 label="主词条"
                 stat={piece.mainStat}

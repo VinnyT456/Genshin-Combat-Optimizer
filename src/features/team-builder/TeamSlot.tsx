@@ -4,7 +4,6 @@ import { useState, type KeyboardEvent } from "react";
 import type { CharacterDefinition, Stats } from "@/types";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
-import { IconButton } from "@/components/ui/IconButton";
 import { ElementTag } from "@/components/ui/ElementTag";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { elementSurfaceClass } from "@/lib/elementSurface";
@@ -13,7 +12,6 @@ import { CharacterAvatar } from "@/components/ui/CharacterAvatar";
 import {
   CARD,
   FOCUS_RING,
-  STATE_GLYPH,
   STATE_TEXT,
   TRANSITION_COLORS,
 } from "@/components/ui/tokens";
@@ -218,7 +216,7 @@ export function FilledTeamSlot({
         aria-current={isActive ? "true" : undefined}
         aria-label={`${slotNumber} 号位：${displayName}。Alt+左右方向键调换席位，Delete 移除。`}
         className={cn(
-          "relative rounded-2xl border p-3 sm:p-3.5 flex h-full flex-col gap-2 shadow-sm cursor-grab active:cursor-grabbing select-none",
+          "relative border p-3 sm:p-3.5 flex h-full flex-col gap-2 cursor-grab active:cursor-grabbing select-none",
           SLOT_MIN_HEIGHT,
           TRANSITION_COLORS,
           FOCUS_RING,
@@ -226,8 +224,8 @@ export function FilledTeamSlot({
           isActive
             // `ring-1 ring-amber-400 border-amber-500` is the specified
             // selection treatment on its own; the glow was redundant.
-            ? "ring-1 ring-amber-400 border-amber-500"
-            : "hover:border-slate-500",
+            ? "ring-1 ring-cyan-300 border-cyan-300"
+            : "hover:border-cyan-400/60",
           isDragging && "opacity-40 scale-[0.98]",
           isDragOver && "ring-2 ring-cyan-400 border-cyan-400 bg-cyan-950/40 scale-[1.02]",
         )}
@@ -275,7 +273,7 @@ export function FilledTeamSlot({
             onClick={() => onEditStats(slotIndex)}
             onKeyDown={handleKeyDown}
             className={cn(
-              "group flex w-full cursor-pointer items-center gap-2.5 rounded-xl border border-transparent bg-surface/35 p-1.5 text-left",
+              "group flex w-full cursor-pointer items-center gap-2.5 rounded-sm border border-transparent bg-surface/35 p-1.5 text-left",
               TRANSITION_COLORS,
               FOCUS_RING,
               "hover:border-surface-border hover:bg-surface/70",
@@ -292,7 +290,7 @@ export function FilledTeamSlot({
               <h3 className="truncate text-base font-bold text-slate-100" title={displayName}>
                 {displayName}
               </h3>
-              <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-micro font-semibold text-amber-300 opacity-80 transition-opacity group-hover:opacity-100">
+              <span className="shrink-0 border border-cyan-300/25 bg-cyan-300/5 px-1.5 py-0.5 text-micro font-semibold text-cyan-200 opacity-80 transition-opacity group-hover:opacity-100">
                 配置
               </span>
             </div>
@@ -349,7 +347,7 @@ export function FilledTeamSlot({
             type="button"
             onClick={() => onSelectWeapon?.(slotIndex)}
             aria-label={`编辑${displayName}的武器配置：${equippedWeapon.nameZh}，等级 ${weaponLevel ?? "未知"}，${weaponSubstatDisplay}`}
-            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-surface-border/60 bg-surface/75 px-2.5 py-2 text-left shadow-sm", TRANSITION_COLORS, FOCUS_RING, "hover:border-amber-400/80 hover:bg-surface-raised group")}
+            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center gap-2 rounded-sm border border-surface-border/60 bg-surface/75 px-2.5 py-2 text-left", TRANSITION_COLORS, FOCUS_RING, "hover:border-cyan-400/70 hover:bg-surface-raised group")}
             title="点击查看武器配置"
           >
             <WeaponAvatar
@@ -362,11 +360,11 @@ export function FilledTeamSlot({
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-1">
-                <span className="truncate text-xs font-bold text-slate-200 group-hover:text-amber-300">
+                <span className="truncate text-xs font-bold text-slate-200 group-hover:text-cyan-200">
                   {equippedWeapon.nameZh}
                 </span>
                 <span className="flex shrink-0 items-center gap-1.5 text-micro font-semibold">
-                  <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-300">
+                  <span className="rounded-sm border border-sky-500/20 bg-sky-500/10 px-1.5 py-0.5 text-sky-300">
                     {weaponRefinement !== undefined ? `精${weaponRefinement}` : "精炼未设置"}
                   </span>
                 </span>
@@ -376,9 +374,9 @@ export function FilledTeamSlot({
                 <span aria-hidden="true">·</span>
                 <span>基础攻击力 <strong className="font-mono font-semibold text-slate-200">{weaponBaseAtk ?? equippedWeapon.baseAtk}</strong></span>
               </div>
-              <div className="mt-1 flex items-center justify-between gap-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1">
-                <span className="shrink-0 text-micro font-medium text-amber-200/80">武器副词条</span>
-                <span className="truncate text-right font-mono text-xs font-bold tabular-nums text-amber-200" title={weaponSubstatDisplay}>
+              <div className="mt-1 flex items-center justify-between gap-2 border-t border-surface-border/60 pt-1">
+                <span className="shrink-0 text-micro font-medium text-slate-500">武器副词条</span>
+                <span className="truncate text-right font-mono text-xs font-bold tabular-nums text-cyan-200" title={weaponSubstatDisplay}>
                   {weaponSubstatDisplay}
                 </span>
               </div>
@@ -389,7 +387,7 @@ export function FilledTeamSlot({
             type="button"
             onClick={() => onSelectWeapon?.(slotIndex)}
             aria-label={`为${displayName}装备武器`}
-            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-surface-border px-2.5 py-1.5 text-xs text-slate-400", TRANSITION_COLORS, FOCUS_RING, "hover:border-amber-400 hover:text-amber-300")}
+            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-sm border border-dashed border-surface-border px-2.5 py-1.5 text-xs text-slate-400", TRANSITION_COLORS, FOCUS_RING, "hover:border-cyan-400 hover:text-cyan-200")}
           >
             <span>+ 装备武器 (4★/5★)</span>
           </button>
@@ -401,17 +399,17 @@ export function FilledTeamSlot({
             type="button"
             onClick={() => onSelectArtifact?.(slotIndex)}
             aria-label={`编辑${displayName}的圣遗物配置：${equippedArtifact.nameZh}，${artifactCombination ?? `${artifactPieces ?? 0}件`}，已录入 ${artifactStatCount ?? 0}/5 件属性`}
-            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-surface-border/60 bg-surface/75 px-2.5 py-2 text-left shadow-sm", TRANSITION_COLORS, FOCUS_RING, "hover:border-amber-400/80 hover:bg-surface-raised group")}
+            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center gap-2 rounded-sm border border-surface-border/60 bg-surface/75 px-2.5 py-2 text-left", TRANSITION_COLORS, FOCUS_RING, "hover:border-cyan-400/70 hover:bg-surface-raised group")}
             title="点击更换装配圣遗物"
           >
             <ArtifactAvatar iconId={equippedArtifact.iconId} nameZh={equippedArtifact.nameZh} size="sm" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-1">
-                <span className="truncate text-xs font-bold text-slate-200 group-hover:text-amber-300">
+                <span className="truncate text-xs font-bold text-slate-200 group-hover:text-cyan-200">
                   {equippedArtifact.nameZh}
                 </span>
                 {artifactSummary && (
-                  <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-micro font-bold text-violet-300">
+                  <span className="shrink-0 border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-micro font-bold text-violet-300">
                     {artifactSummary}
                   </span>
                 )}
@@ -448,19 +446,17 @@ export function FilledTeamSlot({
             type="button"
             onClick={() => onSelectArtifact?.(slotIndex)}
             aria-label={`为${displayName}装备圣遗物`}
-            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-surface-border px-2.5 py-1.5 text-xs text-slate-400", TRANSITION_COLORS, FOCUS_RING, "hover:border-amber-400 hover:text-amber-300")}
+            className={cn("relative z-20 flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-sm border border-dashed border-surface-border px-2.5 py-1.5 text-xs text-slate-400", TRANSITION_COLORS, FOCUS_RING, "hover:border-cyan-400 hover:text-cyan-200")}
           >
             <span>+ 装备圣遗物</span>
           </button>
         )}
 
         {/* Honesty marker: a recommended-build main stat the engine cannot
-            model (e.g. Bennett's Healing Bonus% circlet). Reuses the info
-            (`◇`) honesty surface — colour is never the sole signal, the note
-            text carries the meaning, and it is shown inline, never hidden. */}
+            model (e.g. Bennett's Healing Bonus% circlet). The note is shown
+            inline so the limitation is never hidden. */}
         {circletNote && (
           <p className={cn("flex items-start gap-1 text-micro", STATE_TEXT.info)}>
-            <span aria-hidden="true">{STATE_GLYPH.info}</span>
             <span>头冠：{circletNote}</span>
           </p>
         )}
@@ -468,7 +464,7 @@ export function FilledTeamSlot({
         {/* Two-row scan keeps labels and values readable on narrow cards. */}
         <dl
           aria-label="角色面板属性"
-          className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg border border-surface-border/50 bg-surface/55 p-2 font-mono"
+          className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-sm border border-surface-border/50 bg-surface/55 p-2 font-mono"
         >
           <div className="flex min-w-0 items-center justify-between gap-2" title="攻击力">
             <dt className="shrink-0 text-micro text-slate-400">攻击</dt>
@@ -524,31 +520,31 @@ export function FilledTeamSlot({
         {/* Slot actions stay at the bottom: movement and removal. */}
         <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-surface-border/40 pt-1.5">
           <span className="ml-auto flex items-center gap-2">
-            <span className="flex items-center gap-0.5" aria-label="调整席位">
-              <IconButton
-                label={`将 ${displayName} 提前一位`}
-                glyph="←"
-                className="cursor-pointer"
+            <span className="flex items-center gap-1" aria-label="调整席位">
+              <button
+                type="button"
+                aria-label={`将 ${displayName} 提前一位`}
+                className={cn("min-h-8 min-w-8 border border-surface-border px-1.5 text-micro text-slate-400 hover:border-cyan-400 hover:text-cyan-200", FOCUS_RING, TRANSITION_COLORS)}
                 disabled={!canMoveEarlier}
                 onClick={() => onMove(slotIndex, slotIndex - 1)}
-              />
-              <IconButton
-                label={`将 ${displayName} 后移一位`}
-                glyph="→"
-                className="cursor-pointer"
+              >前移</button>
+              <button
+                type="button"
+                aria-label={`将 ${displayName} 后移一位`}
+                className={cn("min-h-8 min-w-8 border border-surface-border px-1.5 text-micro text-slate-400 hover:border-cyan-400 hover:text-cyan-200", FOCUS_RING, TRANSITION_COLORS)}
                 disabled={!canMoveLater}
                 onClick={() => onMove(slotIndex, slotIndex + 1)}
-              />
+              >后移</button>
             </span>
-            <span className="hidden sm:inline font-mono text-micro text-slate-400 select-none">
-              ⋮⋮ 拖拽
+            <span className="hidden select-none font-mono text-micro text-slate-400 sm:inline">
+              可拖拽排序
             </span>
-            <IconButton
-              label={`将 ${displayName} 从队伍中移除`}
-              glyph="✕"
-              className="cursor-pointer"
+            <button
+              type="button"
+              aria-label={`将 ${displayName} 从队伍中移除`}
+              className={cn("min-h-8 border border-surface-border px-2 text-micro text-slate-400 hover:border-red-400/70 hover:text-red-300", FOCUS_RING, TRANSITION_COLORS)}
               onClick={() => onRemove(slotIndex)}
-            />
+            >移除</button>
           </span>
         </div>
         </div>
@@ -594,13 +590,13 @@ export function EmptyTeamSlot({ slotIndex, onAdd, onMove }: EmptyProps) {
         aria-label={`添加角色至 ${slotNumber} 号位`}
         className={cn(
           SLOT_MIN_HEIGHT,
-          "flex h-full w-full flex-col rounded-xl border border-dashed border-surface-border/80 bg-surface/30 p-5 text-left hover:border-amber-400/60 hover:bg-surface-raised/40 transition-colors duration-150 group",
+          "flex h-full w-full flex-col rounded-sm border border-dashed border-surface-border/80 bg-surface/30 p-5 text-left transition-colors duration-150 group hover:border-cyan-400/60 hover:bg-surface-raised/40",
           isDragOver && "ring-2 ring-amber-400 border-amber-400 bg-amber-950/20 scale-[1.02]",
           FOCUS_RING,
         )}
       >
         <span className="text-xs font-semibold text-slate-400">{slotNumber} 号位 · 空缺</span>
-        <span className="m-auto text-sm font-semibold text-slate-300 group-hover:text-amber-400 transition-colors">
+          <span className="m-auto text-sm font-semibold text-slate-300 transition-colors group-hover:text-cyan-200">
           + 配置出战角色
         </span>
         <span className="text-xs text-slate-400">

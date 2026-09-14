@@ -39,16 +39,16 @@ export function WeaponAvatar({
 }: Props) {
   const [loadFailed, setLoadFailed] = useState(false);
 
-  const rarityGradient =
+  const raritySurface =
     rarity === 5
-      ? "from-amber-500/25 to-amber-950/40 border-amber-500/40"
-      : "from-purple-500/25 to-purple-950/40 border-purple-500/40";
+      ? "border-amber-500/40 bg-amber-500/10"
+      : "border-purple-500/40 bg-purple-500/10";
 
   return (
     <div
       className={cn(
-        "relative flex shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-gradient-to-b shadow-sm",
-        rarityGradient,
+        "relative flex shrink-0 items-center justify-center overflow-hidden rounded-sm border",
+        raritySurface,
         SIZE_CLASSES[size],
         className,
       )}

@@ -29,7 +29,7 @@ export function Section({ title, code, id, actions, children, className }: Props
           )}
           <h2
             id={id}
-            className="text-base sm:text-lg font-bold tracking-tight text-slate-100"
+            className="text-balance text-base font-bold tracking-tight text-slate-100 sm:text-lg"
           >
             {title}
           </h2>

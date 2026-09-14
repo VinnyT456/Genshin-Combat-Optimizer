@@ -1,5 +1,5 @@
 import { cn } from "@/components/ui/cn";
-import { STATE_CHIP, STATE_GLYPH } from "@/components/ui/tokens";
+import { STATE_CHIP } from "@/components/ui/tokens";
 
 interface Props {
   /** What is missing, e.g. "命之座". */
@@ -26,9 +26,6 @@ export function PendingDataNotice({ subject, consequence, className }: Props) {
         className,
       )}
     >
-      <span aria-hidden="true" className="mt-0.5">
-        {STATE_GLYPH.info}
-      </span>
       <p className="leading-relaxed">
         <span className="font-semibold">{subject}尚未录入。</span> {consequence}
       </p>

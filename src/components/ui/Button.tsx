@@ -7,10 +7,12 @@ import { DISABLED, FOCUS_RING, TRANSITION_COLORS } from "@/components/ui/tokens"
 export type ButtonVariant = "primary" | "secondary" | "quiet";
 
 const VARIANT: Record<ButtonVariant, string> = {
-  primary: "bg-amber-500 text-black font-semibold hover:bg-amber-400",
+  primary:
+    "border border-cyan-300/70 bg-cyan-300/10 text-cyan-100 font-semibold shadow-[inset_3px_0_0_rgba(34,211,238,0.75)] hover:border-cyan-200 hover:bg-cyan-300/20 hover:text-white active:bg-cyan-300/25",
   secondary:
-    "border border-surface-border bg-surface-raised text-slate-200 hover:bg-surface-hover",
-  quiet: "text-slate-400 hover:text-slate-100",
+    "border border-surface-border bg-surface-raised text-slate-200 hover:border-cyan-400/60 hover:bg-surface-hover hover:text-cyan-100",
+  quiet:
+    "border border-transparent text-slate-400 hover:border-fuchsia-400/40 hover:bg-fuchsia-400/5 hover:text-fuchsia-100",
 };
 
 export type ButtonSize = "sm" | "md";
@@ -44,7 +46,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "rounded-md active:translate-y-px",
+        "inline-flex items-center justify-center gap-2 rounded-sm font-medium active:translate-y-px",
         TRANSITION_COLORS,
         FOCUS_RING,
         DISABLED,

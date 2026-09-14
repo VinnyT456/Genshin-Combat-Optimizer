@@ -51,16 +51,15 @@ export interface WeaponOption {
   readonly id: WeaponFilter;
   readonly label: string;
   readonly labelZh: string;
-  readonly icon: string;
 }
 
 export const WEAPON_OPTIONS: readonly WeaponOption[] = [
-  { id: "all", label: "All", labelZh: "全部武器", icon: "✦" },
-  { id: "sword", label: "Sword", labelZh: "单手剑", icon: "🗡" },
-  { id: "claymore", label: "Claymore", labelZh: "双手剑", icon: "⚔" },
-  { id: "polearm", label: "Polearm", labelZh: "长柄武器", icon: "🔱" },
-  { id: "bow", label: "Bow", labelZh: "弓", icon: "🏹" },
-  { id: "catalyst", label: "Catalyst", labelZh: "法器", icon: "📖" },
+  { id: "all", label: "All", labelZh: "全部武器" },
+  { id: "sword", label: "Sword", labelZh: "单手剑" },
+  { id: "claymore", label: "Claymore", labelZh: "双手剑" },
+  { id: "polearm", label: "Polearm", labelZh: "长柄武器" },
+  { id: "bow", label: "Bow", labelZh: "弓" },
+  { id: "catalyst", label: "Catalyst", labelZh: "法器" },
 ];
 
 export interface RarityOption {
@@ -79,18 +78,17 @@ export interface CharacterMetadata {
   readonly weaponType: WeaponType;
   readonly weaponLabel: string;
   readonly weaponLabelZh: string;
-  readonly weaponIcon: string;
   readonly rarity: Rarity;
   readonly supportTier: string;
   readonly tierReason?: string;
 }
 
-const WEAPON_LABELS: Record<WeaponType, { label: string; labelZh: string; icon: string }> = {
-  sword: { label: "Sword", labelZh: "单手剑", icon: "🗡" },
-  claymore: { label: "Claymore", labelZh: "双手剑", icon: "⚔" },
-  polearm: { label: "Polearm", labelZh: "长柄武器", icon: "🔱" },
-  bow: { label: "Bow", labelZh: "弓", icon: "🏹" },
-  catalyst: { label: "Catalyst", labelZh: "法器", icon: "📖" },
+const WEAPON_LABELS: Record<WeaponType, { label: string; labelZh: string }> = {
+  sword: { label: "Sword", labelZh: "单手剑" },
+  claymore: { label: "Claymore", labelZh: "双手剑" },
+  polearm: { label: "Polearm", labelZh: "长柄武器" },
+  bow: { label: "Bow", labelZh: "弓" },
+  catalyst: { label: "Catalyst", labelZh: "法器" },
 };
 
 /**
@@ -118,7 +116,6 @@ export function getCharacterMetadata(characterId: string): CharacterMetadata {
     const weaponInfo = WEAPON_LABELS[registered.weaponType] ?? {
       label: registered.weaponType,
       labelZh: weaponZh(registered.weaponType),
-      icon: "🗡",
     };
     // Tier is passed through from the registry claim, UNMODIFIED.
     //
@@ -137,7 +134,6 @@ export function getCharacterMetadata(characterId: string): CharacterMetadata {
       weaponType: registered.weaponType,
       weaponLabel: weaponInfo.label,
       weaponLabelZh: weaponInfo.labelZh,
-      weaponIcon: weaponInfo.icon,
       rarity: registered.rarity,
       supportTier: registered.claim.supportTier,
       tierReason: registered.claim.tierReason,
@@ -159,7 +155,6 @@ export function getCharacterMetadata(characterId: string): CharacterMetadata {
     weaponType,
     weaponLabel: weaponInfo.label,
     weaponLabelZh: weaponInfo.labelZh,
-    weaponIcon: weaponInfo.icon,
     rarity: 5,
     supportTier: "FULL",
   };

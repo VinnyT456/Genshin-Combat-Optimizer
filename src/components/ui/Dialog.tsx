@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/components/ui/cn";
-import { IconButton } from "@/components/ui/IconButton";
+import { Button } from "@/components/ui/Button";
 import { acquireScrollLock, releaseScrollLock } from "@/components/ui/scrollLock";
 
 const FOCUSABLE_SELECTOR = [
@@ -146,7 +146,7 @@ export function Dialog({
         onKeyDown={handleKeyDown}
         className={cn(
           "relative flex max-h-[100dvh] w-full flex-col overflow-hidden border border-surface-border bg-surface-raised shadow-xl shadow-black/70",
-          "rounded-t-xl sm:rounded-xl",
+          "rounded-none sm:rounded-sm",
           SIZE_CLASS[size],
           className,
         )}
@@ -156,7 +156,9 @@ export function Dialog({
           <h2 id={titleId} className="text-lg font-semibold">
             {title}
           </h2>
-          <IconButton label="关闭对话框" glyph="✕" onClick={onClose} />
+          <Button variant="quiet" size="sm" onClick={onClose} aria-label="关闭对话框">
+            关闭
+          </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-4" style={{ overscrollBehavior: "contain" }}>
           {children}

@@ -28,15 +28,48 @@ function renderPicker(overrides: Partial<Parameters<typeof ArtifactPicker>[0]> =
 }
 
 function gridImages(): HTMLImageElement[] {
-  return Array.from(document.querySelectorAll("img"));
+  return Array.from(document.querySelectorAll('[aria-label="圣遗物套装库"] img'));
+}
+
+function previewImages(): HTMLImageElement[] {
+  return Array.from(document.querySelectorAll('[aria-label="圣遗物装备预览"] img'));
 }
 
 describe("ArtifactPicker renders set icons", () => {
+  it("renders the reference-inspired three-pane workbench", () => {
+    renderPicker();
+    expect(screen.getByRole("region", { name: "圣遗物套装库" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "圣遗物装备预览" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "生之花属性" })).toBeInTheDocument();
+    expect(screen.getByText("圣遗物配置工作台")).toBeInTheDocument();
+  });
+
   it("renders one icon per listed set", () => {
     renderPicker();
     // Every set in the registry carries a usable iconId, so every card in the
     // unfiltered grid should render an image rather than a placeholder.
     expect(gridImages()).toHaveLength(allArtifacts.length);
+  });
+
+  it("shows the selected set's image in the detailed preview", () => {
+    const equipped = allArtifacts.find((set) => set.id === "emblem-of-severed-fate")!;
+    renderPicker({ currentArtifactId: equipped.id });
+    const image = previewImages()[0];
+    expect(image).toBeDefined();
+    expect(image?.getAttribute("src") ?? "").toContain("UI_RelicIcon_");
+    expect(image?.getAttribute("width")).toBe("96");
+    expect(image?.getAttribute("height")).toBe("96");
+  });
+
+  it("uses a smaller slot-specific image in the five-piece list", () => {
+    const equipped = allArtifacts.find((set) => set.id === "emblem-of-severed-fate")!;
+    renderPicker({ currentArtifactId: equipped.id });
+    const plumeImage = document.querySelector('button[aria-label^="死之羽"] img');
+    expect(plumeImage).not.toBeNull();
+    expect(plumeImage?.getAttribute("src") ?? "").toContain("UI_RelicIcon_15020_2.webp");
+    expect(plumeImage?.getAttribute("width")).toBe("32");
+    expect(plumeImage?.getAttribute("height")).toBe("32");
+    expect(plumeImage?.parentElement?.className).toContain("bg-transparent");
   });
 
   it("points every icon at the verified primary CDN path", () => {
@@ -83,8 +116,8 @@ describe("ArtifactPicker renders set icons", () => {
     renderPicker();
     expect(gridImages()).toHaveLength(allArtifacts.length);
     for (const img of gridImages()) {
-      expect(img.getAttribute("width")).toBe("36");
-      expect(img.getAttribute("height")).toBe("36");
+      expect(img.getAttribute("width")).toBe("48");
+      expect(img.getAttribute("height")).toBe("48");
     }
   });
 });

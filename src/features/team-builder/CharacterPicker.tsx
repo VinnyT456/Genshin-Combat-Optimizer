@@ -18,7 +18,6 @@ import {
   DISABLED,
   FOCUS_RING,
   STATE_CHIP,
-  STATE_GLYPH,
   TRANSITION_COLORS,
 } from "@/components/ui/tokens";
 import { type Team, slotOf } from "@/features/team-builder/teamModel";
@@ -253,7 +252,7 @@ export function CharacterPicker({
           aria-label={accessibleName}
           onClick={() => onSelect(slotIndex, character)}
           className={cn(
-            "flex h-full w-full flex-col gap-2 rounded-xl border p-3 text-left",
+            "flex h-full w-full flex-col gap-2 rounded-sm border p-3 text-left",
             elementCardTint,
             TRANSITION_COLORS,
             FOCUS_RING,
@@ -336,14 +335,12 @@ export function CharacterPicker({
         {rosterBaseline !== null && (
           <div
             className={cn(
-              "flex flex-wrap items-start gap-x-2 gap-y-1 rounded-md border px-3 py-2 text-xs",
+              "flex flex-wrap items-start gap-x-2 gap-y-1 rounded-sm border px-3 py-2 text-xs",
               STATE_CHIP[formatBaseline(rosterBaseline).state],
             )}
           >
             <span className="font-semibold">
-              <span aria-hidden="true">
-                {STATE_GLYPH[formatBaseline(rosterBaseline).state]}{" "}
-              </span>
+              状态：
               全部角色 · {tierZh(rosterBaseline.supportTier)}
             </span>
             {/*
@@ -371,7 +368,7 @@ export function CharacterPicker({
               aria-label="搜索角色"
               placeholder="搜索角色名称、武器类型、或元素（支持中英文，快捷键 /）…"
               className={cn(
-                "w-full rounded-xl border border-surface-border bg-surface-raised px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500",
+                "w-full rounded-sm border border-surface-border bg-surface-raised px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500",
                 FOCUS_RING,
               )}
             />
@@ -382,7 +379,7 @@ export function CharacterPicker({
                 aria-label="清空搜索"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-200"
               >
-                ✕
+                清空
               </button>
             )}
           </div>
@@ -400,7 +397,7 @@ export function CharacterPicker({
                       type="button"
                       onClick={() => setElementFilter(opt.id)}
                       className={cn(
-                        "rounded-md border px-2.5 py-1 transition-colors",
+                "rounded-sm border px-2.5 py-1 transition-colors",
                         active ? pillStyles.active : pillStyles.default,
                         FOCUS_RING,
                       )}
@@ -423,7 +420,7 @@ export function CharacterPicker({
                       type="button"
                       onClick={() => setWeaponFilter(opt.id)}
                       className={cn(
-                        "rounded-md border px-2.5 py-1 transition-colors",
+                        "rounded-sm border px-2.5 py-1 transition-colors",
                         active
                           ? "border-amber-500 bg-amber-500/20 text-amber-300 font-semibold"
                           : "border-surface-border text-slate-400 hover:text-slate-200",
@@ -448,7 +445,7 @@ export function CharacterPicker({
                       type="button"
                       onClick={() => setRarityFilter(opt.id)}
                       className={cn(
-                        "rounded-md border px-2.5 py-1 transition-colors",
+                        "rounded-sm border px-2.5 py-1 transition-colors",
                         active
                           ? "border-amber-500 bg-amber-500/20 text-amber-300 font-semibold"
                           : "border-surface-border text-slate-400 hover:text-slate-200",
@@ -465,47 +462,47 @@ export function CharacterPicker({
         </div>
 
         {hasActiveFilters && (
-          <div className="flex items-center justify-between rounded-md border border-surface-border bg-surface-raised/50 px-3 py-1.5 text-xs text-slate-400">
+          <div className="flex items-center justify-between rounded-sm border border-surface-border bg-surface-raised/50 px-3 py-1.5 text-xs text-slate-400">
             <div className="flex flex-wrap items-center gap-1.5">
               <span>已生效筛选:</span>
               {elementFilter !== "all" && (
                 <button
                   type="button"
                   onClick={() => setElementFilter("all")}
-                  className="flex items-center gap-1 rounded-md border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
+                  className="flex items-center gap-1 rounded-sm border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
                 >
                   <span>元素: {elementZh(elementFilter)}</span>
-                  <span aria-hidden="true">✕</span>
+                  <span className="text-micro text-slate-500">清除</span>
                 </button>
               )}
               {weaponFilter !== "all" && (
                 <button
                   type="button"
                   onClick={() => setWeaponFilter("all")}
-                  className="flex items-center gap-1 rounded-md border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
+                  className="flex items-center gap-1 rounded-sm border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
                 >
                   <span>武器: {weaponZh(weaponFilter)}</span>
-                  <span aria-hidden="true">✕</span>
+                  <span className="text-micro text-slate-500">清除</span>
                 </button>
               )}
               {rarityFilter !== "all" && (
                 <button
                   type="button"
                   onClick={() => setRarityFilter("all")}
-                  className="flex items-center gap-1 rounded-md border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
+                  className="flex items-center gap-1 rounded-sm border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
                 >
                   <span>星级: {rarityFilter}★</span>
-                  <span aria-hidden="true">✕</span>
+                  <span className="text-micro text-slate-500">清除</span>
                 </button>
               )}
               {query.trim().length > 0 && (
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="flex items-center gap-1 rounded-md border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
+                  className="flex items-center gap-1 rounded-sm border border-surface-border bg-surface px-2 py-0.5 text-slate-200 hover:border-slate-400"
                 >
                   <span>搜索: “{query.trim()}”</span>
-                  <span aria-hidden="true">✕</span>
+                  <span className="text-micro text-slate-500">清除</span>
                 </button>
               )}
             </div>
@@ -524,11 +521,10 @@ export function CharacterPicker({
         {emptyState.kind === "all-taken" && (
           <div
             className={cn(
-              "flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs",
+              "flex items-center gap-2 rounded-sm border px-4 py-2.5 text-xs",
               STATE_CHIP.info,
             )}
           >
-            <span aria-hidden="true">◇</span>
             <span>{emptyState.message}</span>
           </div>
         )}
@@ -543,7 +539,7 @@ export function CharacterPicker({
         {emptyState.kind !== "none" && emptyState.kind !== "all-taken" ? (
           <div
             className={cn(
-              "rounded-xl border p-6 text-center text-sm",
+              "rounded-sm border p-6 text-center text-sm",
               emptyState.kind === "roster-error"
                 ? STATE_CHIP.error
                 : "border-surface-border bg-surface text-slate-400",
@@ -556,7 +552,7 @@ export function CharacterPicker({
                 type="button"
                 onClick={clearSearchOnly}
                 className={cn(
-                  "mt-3 rounded-md border border-surface-border px-3 py-1.5 text-xs text-amber-400",
+                  "mt-3 rounded-sm border border-surface-border px-3 py-1.5 text-xs text-cyan-200",
                   TRANSITION_COLORS,
                   "hover:border-amber-400/60 hover:text-amber-300",
                   FOCUS_RING,
@@ -570,7 +566,7 @@ export function CharacterPicker({
                 type="button"
                 onClick={clearAllFilters}
                 className={cn(
-                  "mt-3 rounded-md border border-surface-border px-3 py-1.5 text-xs text-amber-400",
+                  "mt-3 rounded-sm border border-surface-border px-3 py-1.5 text-xs text-cyan-200",
                   TRANSITION_COLORS,
                   "hover:border-amber-400/60 hover:text-amber-300",
                   FOCUS_RING,
@@ -587,7 +583,7 @@ export function CharacterPicker({
                 ELEMENT_SECTION_LABELS[group.element] ?? elementZh(group.element);
               return (
                 <section key={group.element} className="space-y-3">
-                  <div className="sticky top-0 z-10 flex items-center justify-between rounded-xl border border-surface-border bg-surface/95 px-4 py-2.5 backdrop-blur-md shadow-md">
+                  <div className="sticky top-0 z-10 flex items-center justify-between rounded-sm border border-surface-border bg-surface px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <ElementTag element={group.element} />
                       <span className="text-sm font-bold text-slate-100">

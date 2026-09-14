@@ -23,6 +23,7 @@ import { runSimulation } from "@/features/simulation/simulationAdapter";
 import { useUrlState } from "@/features/simulation/useUrlState";
 import {
   EQUIPMENT_STORAGE_KEY,
+  type CharacterEquipmentSelection,
   type EquipmentSelections,
   emptyEquipmentSelections,
   parseSelections,
@@ -99,6 +100,8 @@ import {
   resonanceFullDescZh,
 } from "@/lib/i18n";
 import { parseWorkspaceDraft, serializeWorkspaceDraft, workspaceDraftKey } from "@/features/simulation/workspacePersistence";
+import { EnkaImportDialog } from "@/features/enka-import/EnkaImportDialog";
+import type { EnkaCommit } from "@/features/enka-import/contracts";
 
 // ---------------------------------------------------------------------------
 // Main page orchestration: holds team, enemy, rotation, and simulation config.
@@ -139,6 +142,20 @@ function mergeDefaultEquipment(
   return next;
 }
 
+function equipmentWithImportedOverrides(
+  team: Team,
+  imported: EquipmentSelections,
+): EquipmentSelections {
+  const merged: Record<string, CharacterEquipmentSelection> = {
+    ...defaultEquipmentForTeam(team),
+  };
+  for (const [characterId, selection] of Object.entries(imported)) {
+    if (!team.some((character) => character?.id === characterId)) continue;
+    merged[characterId] = { ...merged[characterId], ...selection };
+  }
+  return merged;
+}
+
 /** Accessible name for the segmented control that scopes the single page. */
 const VIEW_SWITCHER_LABEL = "工作区视图";
 
@@ -177,6 +194,9 @@ export default function Home() {
   );
   const initialTeamRef = useRef(team);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
+  const [enkaOpen, setEnkaOpen] = useState(true);
+  const [enkaRoster, setEnkaRoster] = useState<readonly CharacterDefinition[] | null>(null);
+  const selectableRoster = enkaRoster ?? roster;
 
   // Simulation & Setup state
   const [enemy, setEnemy] = useState<EnemyState>(testEnemy);
@@ -266,22 +286,30 @@ export default function Home() {
   );
 
   // Adopt the team encoded in the URL. Runs on first load and on Back/Forward
-  // (both surface as a new `urlState`). Ids that no longer exist in the roster
-  // resolve to an empty slot rather than blanking the whole team.
+  // (both surface as a new `urlState`). Ids that no longer exist in the active
+  // roster resolve to an empty slot rather than bypassing the Enka character
+  // lock through a manually edited URL.
   useEffect(() => {
     if (!urlHydrated) return;
     const encoded = urlState.team;
     if (encoded.every((id) => id === null)) return;
     setTeam((current) => {
       const next = encoded.map((id, index) =>
-        id === null ? null : ({ ...(roster.find((c) => c.id === id) ?? {}), ...(current[index]?.id === id ? current[index] : {}) } as CharacterDefinition),
+        id === null
+          ? null
+          : (() => {
+              const character = selectableRoster.find((candidate) => candidate.id === id);
+              return character === undefined
+                ? null
+                : { ...character, ...(current[index]?.id === id ? current[index] : {}) };
+            })(),
       );
       const sameAsCurrent =
         next.length === current.length &&
         next.every((c, i) => (c?.id ?? null) === (current[i]?.id ?? null));
       return sameAsCurrent ? current : next;
     });
-  }, [urlState.team, urlHydrated, roster]);
+  }, [urlState.team, urlHydrated, selectableRoster]);
 
   // URL navigation and quick presets can introduce characters without going
   // through the picker. Add starter weapons for those members after the team
@@ -377,26 +405,45 @@ export default function Home() {
   // update inputs, which keeps each one a single obvious responsibility.
   const handleTeamChange = useCallback(
     (nextTeam: Team) => {
-      setTeam(nextTeam);
+      const allowedIds = new Set(selectableRoster.map((character) => character.id));
+      const restrictedTeam = nextTeam.map((character) =>
+        character === null || allowedIds.has(character.id) ? character : null,
+      );
+      setTeam(restrictedTeam);
       // Selections are keyed by character id, so a removed character's gear
       // would otherwise persist invisibly and reappear on re-add. Pruned on
       // team change rather than on render, which would fight the picker.
       setEquipment((current) =>
         mergeDefaultEquipment(
-          nextTeam,
+          restrictedTeam,
           pruneSelections(
             current,
-            nextTeam.filter((c): c is CharacterDefinition => c !== null).map((c) => c.id),
+            restrictedTeam.filter((c): c is CharacterDefinition => c !== null).map((c) => c.id),
           ),
         ),
       );
       pushUrlState({
         ...urlState,
-        team: nextTeam.map((c) => c?.id ?? null),
+        team: restrictedTeam.map((c) => c?.id ?? null),
       });
     },
-    [urlState, pushUrlState],
+    [urlState, pushUrlState, selectableRoster],
   );
+
+  const handleEnkaCommit = useCallback((commit: EnkaCommit) => {
+    const nextTeam: Team = [...commit.characters.slice(0, 4), null, null, null, null].slice(0, 4);
+    setEnkaRoster(commit.availableCharacters);
+    setTeam(nextTeam);
+    // Enka currently exposes more weapon/artifact ids than this local catalog
+    // can safely join. Preserve imported selections, then fill any gaps with
+    // the same recommended baseline used for ordinary team additions. Start
+    // from the baseline so a future mapped weapon does not suppress its
+    // character's recommended artifact loadout.
+    setEquipment(equipmentWithImportedOverrides(nextTeam, commit.equipment));
+    setActiveCharacterId(commit.characters[0]?.id ?? null);
+    pushUrlState({ ...urlState, team: nextTeam.map((character) => character?.id ?? null) });
+    setAnnouncement(`已导入 ${commit.characters.length} 位角色，装备已替换。`);
+  }, [pushUrlState, urlState]);
 
   const handleEnemyChange = useCallback((nextEnemy: EnemyState) => {
     setEnemy(nextEnemy);
@@ -576,76 +623,72 @@ export default function Home() {
   const showResults = view === "all" || view === "results";
 
   return (
-    <main id={MAIN_CONTENT_ID} className="mx-auto max-w-7xl px-4 py-10 sm:px-8 space-y-12">
+    <main id={MAIN_CONTENT_ID} className="relative mx-auto max-w-7xl space-y-10 overflow-x-hidden px-4 py-6 sm:px-8 sm:py-8">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-72 bg-[linear-gradient(180deg,rgba(8,145,178,0.08),transparent_80%)]" />
       {/* Top Header */}
-      <header className="border-b border-surface-border/60 pb-6 space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">
+      <header className="border-b border-cyan-300/20 pb-5">
+        <div className="flex flex-wrap items-end justify-between gap-5">
+          <div className="min-w-0">
+            <p className="font-mono text-micro font-bold uppercase tracking-[0.22em] text-cyan-300/70">
+              COMBAT // ROTATION OPTIMIZER
+            </p>
+            <h1 className="mt-2 max-w-3xl text-balance text-2xl font-bold tracking-tight text-slate-50 sm:text-3xl">
               原神战斗循环模拟器
             </h1>
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-1 max-w-2xl text-sm text-slate-400">
               精确伤害计算 · 循环轴时序分析 · 充能自循环校验
             </p>
           </div>
+          <div className="flex items-center gap-2 border border-fuchsia-300/30 bg-fuchsia-300/5 px-3 py-2 font-mono text-micro text-fuchsia-200/80">
+            <span aria-hidden="true" className="h-1.5 w-1.5 bg-fuchsia-300" />
+            <span>WORKSPACE ONLINE</span>
+          </div>
         </div>
 
-        {/* Global Telemetry Ribbon & View Switcher */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border/80 bg-surface-raised/50 px-4 py-2.5 text-xs text-slate-300">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              <span className="text-slate-400">出战席位:</span>
-              <span className="font-semibold text-slate-200">
-                <span className="font-mono tabular-nums">{count}/4</span> 角色
-              </span>
-            </div>
-            {resonances.length > 0 && (
-              <>
-                <span className="text-slate-600">·</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">元素共鸣:</span>
-                  <div className="flex items-center gap-1">
-                    {resonances.map((r) => (
-                      <span
-                        key={r.id}
-                        className="rounded bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 text-xs text-amber-300 font-medium"
-                        title={resonanceFullDescZh(r.name) || r.fullDesc}
-                      >
-                        {resonanceNameZh(r.name)} ({resonanceShortDescZh(r.name) || r.shortDesc})
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-            <span className="text-slate-600">·</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">目标:</span>
-              <span className="font-semibold text-slate-200">{enemyNameZh(enemy.name)}</span>
-                        <span className="font-mono text-slate-400">（等级 {enemy.level}）</span>
-            </div>
-            <span className="text-slate-600">·</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">动作序列:</span>
-              <span className="font-semibold text-amber-400">
-                <span className="font-mono tabular-nums">{rotation.length}</span> 步
-              </span>
-            </div>
+        {/* Compact telemetry rail: readable status cells instead of a floating card stack. */}
+        <div className="mt-5 grid gap-px overflow-hidden border border-surface-border bg-surface-border sm:grid-cols-2 lg:grid-cols-4">
+          <div className="bg-surface-raised px-3 py-2.5">
+            <p className="font-mono text-micro uppercase tracking-wider text-slate-500">TEAM / MEMBERS</p>
+            <p className="mt-1 text-sm font-semibold text-slate-100"><span className="font-mono tabular-nums text-cyan-200">{count}/4</span> 角色</p>
           </div>
+          <div className="bg-surface-raised px-3 py-2.5">
+            <p className="font-mono text-micro uppercase tracking-wider text-slate-500">TARGET / LEVEL</p>
+            <p className="mt-1 truncate text-sm font-semibold text-slate-100">{enemyNameZh(enemy.name)} <span className="font-mono text-xs font-normal text-slate-400">Lv.{enemy.level}</span></p>
+          </div>
+          <div className="bg-surface-raised px-3 py-2.5">
+            <p className="font-mono text-micro uppercase tracking-wider text-slate-500">ROTATION / ACTIONS</p>
+            <p className="mt-1 text-sm font-semibold text-cyan-200"><span className="font-mono tabular-nums">{rotation.length}</span> 步</p>
+          </div>
+          <div className="bg-surface-raised px-3 py-2.5">
+            <p className="font-mono text-micro uppercase tracking-wider text-slate-500">RESONANCE</p>
+            {resonances.length > 0 ? (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {resonances.map((r) => (
+                  <span
+                    key={r.id}
+                    className="rounded-sm border border-amber-500/30 bg-amber-500/5 px-1.5 py-0.5 text-micro font-medium text-amber-300"
+                    title={resonanceFullDescZh(r.name) || r.fullDesc}
+                  >
+                    {resonanceNameZh(r.name)}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm text-slate-500">未激活</p>
+            )}
+          </div>
+        </div>
 
-          {/*
-            Segmented view switcher. With the routed shell gone this is the
-            page's only navigation control, so the selected view is exposed via
-            `aria-pressed` rather than by colour alone, and the group carries a
-            name. Previously three hand-copied buttons; the states now come
-            from one table so a new view cannot ship with a different style.
-          */}
-          <div
-            role="group"
-            aria-label={VIEW_SWITCHER_LABEL}
-            className="inline-flex rounded-md border border-surface-border bg-surface p-0.5 text-xs"
-          >
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-l-2 border-cyan-300/60 bg-surface-raised/70 px-3 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-micro text-slate-500">
+            <span className="font-mono text-cyan-300/70">STATUS</span>
+            <span aria-hidden="true">·</span>
+            <span>{canSimulate ? "配置就绪" : "等待配置"}</span>
+            <span aria-hidden="true">·</span>
+            <span className="truncate">{resonances.length > 0 ? resonanceShortDescZh(resonances[0]!.name) || resonances[0]!.shortDesc : "可开始编辑战斗环境"}</span>
+          </div>
+          {/* The scope switch is stateful navigation, but visually it reads as a compact console tab bar. */}
+          <div role="group" aria-label={VIEW_SWITCHER_LABEL} className="inline-flex border border-surface-border bg-surface text-xs">
             {VIEW_OPTIONS.map((option) => {
               const selected = view === option.view;
               return (
@@ -655,12 +698,12 @@ export default function Home() {
                   onClick={() => setView(option.view)}
                   aria-pressed={selected}
                   className={cn(
-                    "rounded px-3 py-1 font-semibold",
+                    "border-l border-surface-border px-3 py-1.5 font-mono font-semibold first:border-l-0",
                     TRANSITION_COLORS,
                     FOCUS_RING,
                     selected
-                      ? "bg-amber-500 text-slate-950 shadow-sm"
-                      : "text-slate-400 hover:text-slate-200",
+                      ? "border-b-2 border-b-cyan-300 bg-cyan-300/10 text-cyan-100"
+                      : "text-slate-500 hover:bg-fuchsia-300/5 hover:text-fuchsia-100",
                   )}
                 >
                   {option.label}
@@ -674,9 +717,14 @@ export default function Home() {
       {/* 1. Team Builder Section */}
       {showSetup && (
         <>
-          <Section title="队伍阵容配置" id="team-heading">
+          <Section
+            title="队伍阵容配置"
+            id="team-heading"
+            actions={!enkaOpen ? <Button variant="secondary" size="sm" onClick={() => setEnkaOpen(true)}>打开 Enka 导入</Button> : undefined}
+          >
+            <EnkaImportDialog open={enkaOpen} onClose={() => setEnkaOpen(false)} onCommit={handleEnkaCommit} />
             <TeamBuilder
-              roster={roster}
+              roster={selectableRoster}
               team={team}
               onTeamChange={handleTeamChange}
               activeCharacterId={resolvedActiveId}
@@ -691,7 +739,6 @@ export default function Home() {
               onEquipmentChange={setEquipment}
             />
           </Section>
-
           {/* 2. Setup Section: Configurable Enemy, Sim Settings & Rotation Editor */}
           <Section title="战斗环境与动作时序编排" id="setup-heading">
             <div className="grid gap-6 lg:grid-cols-12">
@@ -746,33 +793,33 @@ export default function Home() {
       )}
 
       {/* 3. Simulation Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-surface-border/80 bg-surface-raised/80 p-5 shadow-sm backdrop-blur-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4 border border-cyan-300/20 bg-surface-raised p-4 sm:p-5">
         <div className="flex items-center gap-4">
           <Button
             size="md"
             variant="primary"
             onClick={handleSimulate}
             disabled={!canSimulate}
-            className="tracking-wide"
+            className="min-w-44 tracking-wide"
           >
             执行循环模拟
           </Button>
 
-          <div className="hidden text-xs text-slate-400 sm:flex items-center gap-1.5">
+          <div className="hidden items-center gap-1.5 font-mono text-xs text-slate-500 sm:flex">
             <kbd className="rounded border border-surface-border bg-surface px-1.5 py-0.5 font-mono text-slate-300">⌘</kbd>
             <span>+</span>
             <kbd className="rounded border border-surface-border bg-surface px-1.5 py-0.5 font-mono text-slate-300">↵</kbd>
-            <span className="text-slate-400">快捷执行</span>
+            <span>快捷执行</span>
           </div>
         </div>
 
         <div className="flex items-center gap-4 text-xs">
           {!canSimulate ? (
-            <span className="text-amber-400 font-medium">
+            <span className="border-l-2 border-amber-300/60 pl-3 font-medium text-amber-300">
               {count === 0 ? EMPTY_TEAM_REASON : EMPTY_ROTATION_REASON}
             </span>
           ) : (
-            <span className="text-slate-400">
+            <span className="border-l-2 border-emerald-300/50 pl-3 text-slate-400">
               就绪 · 点击运行模拟获取伤害与充能数据
             </span>
           )}
@@ -784,9 +831,8 @@ export default function Home() {
       {/* Stale Result Banner */}
       {resultStale && (
         <Section title="测算状态提示" id="stale-heading">
-          <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-xl border p-4 text-sm", STATE_CHIP.info)}>
+          <div className={cn("flex flex-wrap items-center justify-between gap-2 rounded-sm border p-4 text-sm", STATE_CHIP.info)}>
             <div className="flex items-center gap-2 font-mono">
-              <span aria-hidden="true">◇</span>
               <span>{STALE_RESULT_NOTICE}</span>
             </div>
             <Button size="sm" variant="primary" onClick={handleSimulate} disabled={!canSimulate}>
@@ -798,7 +844,7 @@ export default function Home() {
 
       {/* 4. Results Section */}
       {showResults && run === null && view === "results" && (
-        <div className="rounded-xl border border-surface-border bg-surface-raised/40 p-10 text-center font-mono space-y-2">
+        <div className="border border-surface-border bg-surface-raised/70 p-10 text-center font-mono space-y-2">
           <p className="text-slate-200 text-sm font-semibold">
             尚未生成模拟结果
           </p>
@@ -845,14 +891,14 @@ export default function Home() {
 
               {/* Elemental Damage Distribution Bar */}
               {elementalShares.length > 0 && (
-                <div className="rounded-xl border border-surface-border/80 bg-surface-raised/60 p-4 space-y-2.5">
+                <div className="border border-surface-border/80 bg-surface-raised/70 p-4 space-y-2.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-slate-300">元素伤害分布:</span>
                     <span className="font-mono text-xs text-slate-400">
                       {elementalShares.map((e) => `${elementZh(e.element)} ${(e.pct * 100).toFixed(1)}%`).join(" · ")}
                     </span>
                   </div>
-                  <div className="flex h-3 w-full overflow-hidden rounded-full bg-surface-raised ring-1 ring-surface-border">
+                  <div className="flex h-3 w-full overflow-hidden rounded-sm bg-surface-raised ring-1 ring-surface-border">
                     {elementalShares.map((e) => (
                       <div
                         key={e.element}
@@ -874,20 +920,19 @@ export default function Home() {
               {/* Utility action: Copy summary */}
               <div className="flex items-center justify-end">
                 <Button size="sm" variant="quiet" onClick={handleCopySummary} className="font-mono text-micro">
-                  {copiedSummary ? "✓ 测算摘要已复制到剪贴板！" : "复制循环摘要"}
+                  {copiedSummary ? "测算摘要已复制到剪贴板" : "复制循环摘要"}
                 </Button>
               </div>
 
               {/* Warnings & Errors */}
               {run.result.warnings.length > 0 && (
-                <div className="rounded-md border border-state-warning-border bg-state-warning-bg p-3 font-mono">
+                <div className="rounded-sm border border-state-warning-border bg-state-warning-bg p-3 font-mono">
                   <div className="mb-1 text-xs font-semibold text-state-warning-fg">
                     模拟提示 ({run.result.warnings.length})
                   </div>
                   <ul className="space-y-1 text-xs">
                     {run.result.warnings.map((w, i) => (
                       <li key={i} className={STATE_TEXT.warning}>
-                        <span aria-hidden="true">⚠ </span>
                         {w}
                       </li>
                     ))}
@@ -896,14 +941,13 @@ export default function Home() {
               )}
 
               {run.result.errors.length > 0 && (
-                <div className="rounded-md border border-state-error-border bg-state-error-bg p-3 font-mono" role="alert">
+                <div className="rounded-sm border border-state-error-border bg-state-error-bg p-3 font-mono" role="alert">
                   <div className="mb-1 text-xs font-semibold text-state-error-fg">
                     模拟错误 ({run.result.errors.length})
                   </div>
                   <ul className="space-y-1 text-xs">
                     {run.result.errors.map((e, i) => (
                       <li key={i} className={STATE_TEXT.error}>
-                        <span aria-hidden="true">✕ </span>
                         {e}
                       </li>
                     ))}
@@ -957,7 +1001,7 @@ export default function Home() {
       )}
 
       {/* Sleek Minimal Footer */}
-      <footer className="mt-16 border-t border-surface-border py-6 font-mono text-xs text-slate-400 flex flex-wrap items-center justify-between gap-4">
+      <footer className="border-t border-cyan-300/15 py-6 font-mono text-xs text-slate-500 flex flex-wrap items-center justify-between gap-4">
         <div>
           原神战斗输出循环模拟器 · 确定性战斗内核与时序编排
         </div>
@@ -981,12 +1025,12 @@ function Stat({
   description?: string;
 }) {
   return (
-    <div className="relative flex flex-col justify-between rounded-xl border border-surface-border/80 bg-surface-raised/80 p-5 shadow-sm transition-colors hover:border-slate-500">
+    <div className="relative flex flex-col justify-between border border-surface-border/80 bg-surface-raised/90 p-4 transition-colors hover:border-cyan-400/50">
       <div>
-        <div className="text-xs font-medium text-slate-400">
+        <div className="font-mono text-xs font-medium uppercase tracking-wider text-slate-500">
           {label}
         </div>
-        <div className="mt-2 font-mono text-3xl sm:text-4xl font-black tracking-tight text-white">
+        <div className="mt-2 font-mono text-3xl font-black tracking-tight text-white sm:text-4xl">
           {value}
         </div>
       </div>
