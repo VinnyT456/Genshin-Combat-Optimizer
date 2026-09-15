@@ -58,7 +58,7 @@ function BreakdownTable({ table }: { table: BreakdownTableModel }) {
           return (
             <li key={row.key}>
               <div className="mb-1 flex items-baseline justify-between text-sm">
-                <span className="min-w-0 truncate" title={fullLabel}>
+                <span className="min-w-0 break-words" title={fullLabel}>
                   {displayLabel}
                   {row.qualifier !== undefined && (
                     // Visible text, not a tooltip: the qualifier is the only
@@ -67,7 +67,7 @@ function BreakdownTable({ table }: { table: BreakdownTableModel }) {
                     <span className="text-slate-400"> · {row.qualifier}</span>
                   )}
                 </span>
-                <span className="ml-2 font-mono text-xs text-slate-300">
+                <span className="ml-2 shrink-0 whitespace-nowrap font-mono text-xs text-slate-300">
                   {fmtNum(row.value)} · {row.percent.toFixed(PERCENT_DECIMALS)}%
                 </span>
               </div>
@@ -91,7 +91,7 @@ function BreakdownTable({ table }: { table: BreakdownTableModel }) {
 export function DamageBreakdown({ result, team }: Props) {
   const tables = buildBreakdownTables(result, team);
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {tables.map((table) => (
         <BreakdownTable key={table.title} table={table} />
       ))}

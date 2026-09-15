@@ -2,8 +2,8 @@ import type { Config } from "tailwindcss";
 
 // ---------------------------------------------------------------------------
 // Design tokens. Source of truth: docs/design/DESIGN-SYSTEM.md.
-// Contrast ratios in that document were measured against surface (#0d0f17) and
-// surface.raised (#161a26); do not change these values without re-measuring.
+// Current surface/CTA contrast is recorded in the 2026 cyberpunk update there.
+// Re-measure contrast before changing surface or foreground values.
 // ---------------------------------------------------------------------------
 
 export default {
@@ -26,11 +26,11 @@ export default {
     extend: {
       colors: {
         surface: {
-          DEFAULT: "#0d0f17",
-          raised: "#161a26",
+          DEFAULT: "#080c10",
+          raised: "#10171c",
           // Hover elevation for raised surfaces (DESIGN-SYSTEM interaction states).
-          hover: "#1c2130",
-          border: "#242a3a",
+          hover: "#19252c",
+          border: "#2b3b43",
         },
         element: {
           pyro: "#ec4c3a",

@@ -8,18 +8,18 @@ export type ButtonVariant = "primary" | "secondary" | "quiet";
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary:
-    "border border-cyan-300/70 bg-cyan-300/10 text-cyan-100 font-semibold shadow-[inset_3px_0_0_rgba(34,211,238,0.75)] hover:border-cyan-200 hover:bg-cyan-300/20 hover:text-white active:bg-cyan-300/25",
+    "border border-[#d4ff5f] bg-[#d4ff5f] text-[#10150a] font-semibold hover:border-[#e2ff99] hover:bg-[#e2ff99] active:bg-[#bce944]",
   secondary:
-    "border border-surface-border bg-surface-raised text-slate-200 hover:border-cyan-400/60 hover:bg-surface-hover hover:text-cyan-100",
+    "border border-surface-border bg-surface-raised text-slate-200 hover:border-cyan-300/60 hover:bg-surface-hover hover:text-white",
   quiet:
-    "border border-transparent text-slate-400 hover:border-fuchsia-400/40 hover:bg-fuchsia-400/5 hover:text-fuchsia-100",
+    "border border-transparent text-slate-400 hover:bg-white/5 hover:text-white",
 };
 
 export type ButtonSize = "sm" | "md";
 
 const SIZE: Record<ButtonSize, string> = {
-  sm: "px-2 py-1 text-xs",
-  md: "px-4 py-2 text-sm",
+  sm: "min-h-11 px-3 py-2 text-xs sm:min-h-9",
+  md: "min-h-11 px-5 py-2.5 text-sm",
 };
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {

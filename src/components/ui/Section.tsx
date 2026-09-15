@@ -19,8 +19,8 @@ interface Props {
  */
 export function Section({ title, code, id, actions, children, className }: Props) {
   return (
-    <section className={cn("space-y-4", className)} aria-labelledby={id}>
-      <div className="flex items-center justify-between gap-3 border-b border-surface-border/50 pb-2.5">
+    <section className={cn("space-y-5", className)} aria-labelledby={id}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-border/70 pb-4">
         <div className="flex items-center gap-2">
           {code && (
             <span className="font-mono text-micro font-bold text-amber-500/90 tracking-wider">
@@ -29,6 +29,7 @@ export function Section({ title, code, id, actions, children, className }: Props
           )}
           <h2
             id={id}
+            tabIndex={-1}
             className="text-balance text-base font-bold tracking-tight text-slate-100 sm:text-lg"
           >
             {title}

@@ -4,16 +4,31 @@
 
 :root {
   color-scheme: dark;
+  --lab-accent: #d4ff5f;
+  --lab-cyan: #69e5ed;
+  --lab-ink: #080c10;
+  --lab-panel: #10171c;
+  --lab-line: #2b3b43;
 }
 
 body {
   @apply bg-surface text-slate-100 antialiased;
-  background-color: #0d0f17;
-  background-image:
-    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
-  background-size: 48px 48px;
-  background-attachment: fixed;
+  background-color: var(--lab-ink);
+}
+
+::selection {
+  background: #d4ff5f;
+  color: #080c10;
+}
+
+/* Navigation can focus a section heading without adding another tab stop. */
+h2[id] {
+  scroll-margin-top: 6rem;
+}
+
+h2[tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--lab-cyan);
+  outline-offset: 6px;
 }
 
 /*
@@ -51,7 +66,7 @@ select {
 }
 
 select {
-  background-color: #161a26;
+  background-color: var(--lab-panel);
   color: #f1f5f9;
 }
 

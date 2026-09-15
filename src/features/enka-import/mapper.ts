@@ -11,7 +11,10 @@ import type { NormalizedEnkaArtifact, NormalizedEnkaPayload } from "./normalize"
 import { CHARACTER_ID_BY_ENKA_ID, WEAPON_ID_BY_ENKA_ID } from "./mappings";
 
 function artifactEquipmentStat(propId: string, value: number): EquipmentStat | undefined {
-  const percentage = value / 100;
+  // Enka sends percentage-point values (e.g. 9.7). Round the converted
+  // fraction so the imported value remains stable when serialized and does
+  // not expose binary noise such as 0.09699999999999999 to the editor.
+  const percentage = Number((value / 100).toFixed(4));
   const elemental: Readonly<Record<string, Element>> = {
     FIGHT_PROP_PHYSICAL_ADD_HURT: "physical",
     FIGHT_PROP_FIRE_ADD_HURT: "pyro",

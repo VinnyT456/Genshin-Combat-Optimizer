@@ -85,7 +85,8 @@ describe("urlState", () => {
       const state: UrlState = {
         team: ["bennett", null, "xiangling", null],
         filters: { element: "pyro", weapon: "polearm", rarity: 4, query: "香菱" },
-        view: "results",
+      view: "results",
+        mode: "uid",
       };
       expect(decodeUrlState(encodeUrlState(state))).toEqual(state);
     });

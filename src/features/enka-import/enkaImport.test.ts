@@ -69,6 +69,7 @@ describe("Enka import", () => {
 
     expect(entry.talents).toEqual({ normal: 8, skill: 9, burst: 10 });
     expect(entry.artifacts).toHaveLength(1);
+    expect(entry.artifacts[0]?.level).toBe(21);
     expect(piece?.slot).toBe("flower");
     expect(piece?.mainStat).toEqual({ stat: "hpFlat", value: 4780 });
     expect(piece?.substats).toEqual([
@@ -76,5 +77,35 @@ describe("Enka import", () => {
       { stat: "critDmg", value: 0.078 },
     ]);
     expect(preview.characters[0]?.artifactSummary).toContain("主/副词条已导入");
+  });
+
+  it("accepts documented propValue payloads and derives a missing set id from the icon", () => {
+    const normalized = normalizeEnkaPayload({ avatarInfoList: [{
+      avatarId: 10000032,
+      propMap: { "4001": { val: "90" } },
+      equipList: [{
+        flat: {
+          icon: "UI_RelicIcon_15007_3",
+          equipType: "EQUIP_DRESS",
+          reliquaryMainstat: { mainPropId: "FIGHT_PROP_CRITICAL_HURT", propValue: "62.2" },
+          reliquarySubstats: [
+            { appendPropId: "FIGHT_PROP_CRITICAL", propValue: "9.7" },
+            { appendPropID: "FIGHT_PROP_CHARGE_EFFICIENCY", propValue: "6.5" },
+          ],
+        },
+        reliquary: { level: 21 },
+      }],
+    }] });
+
+    const preview = mapEnkaPayload(normalized, "123456789");
+    const entry = normalized.characters[0]!;
+    const piece = preview.characters[0]?.equipment?.artifactLoadout?.circlet;
+
+    expect(entry.artifacts[0]).toMatchObject({ setId: 15007, slot: "circlet", level: 21 });
+    expect(piece?.mainStat).toEqual({ stat: "critDmg", value: 0.622 });
+    expect(piece?.substats).toEqual([
+      { stat: "critRate", value: 0.097 },
+      { stat: "energyRecharge", value: 0.065 },
+    ]);
   });
 });

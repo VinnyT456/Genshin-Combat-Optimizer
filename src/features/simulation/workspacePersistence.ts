@@ -1,8 +1,10 @@
 import type { CharacterDefinition, EnemyState, Rotation, SimulationConfig } from "@/types";
+import { equipmentStorageKey, type CharacterEquipmentSelection } from "@/features/team-builder/equipmentSelection";
 import { canonicalizeSerializable, fingerprintSerializable } from "@/features/optimizer/searchTransport";
 
 export const WORKSPACE_SCHEMA_VERSION = 1;
 const KEY = "genshin-workspace-draft-v1";
+const CONTEXT_PREFIX = "genshin-workspace-context-v1";
 const REPLAY_KIND = "genshin-replay-pack";
 
 export interface WorkspaceDraftSnapshot {
@@ -50,7 +52,46 @@ export type ProjectStorageStatus =
   | { readonly state: "saved" | "loaded" | "missing"; readonly projectId: string }
   | { readonly state: "invalid" | "disabled" | "quota"; readonly projectId: string; readonly reason: string; readonly evictedProjectId?: string };
 
-export function workspaceDraftKey(): string { return KEY; }
+export type WorkspaceStorageMode = "uid" | "experiment";
+export interface WorkspaceImportContext {
+  readonly uid: string;
+  /** The selected four characters that should seed the first UID workspace. */
+  readonly characters: readonly CharacterDefinition[];
+  readonly availableCharacters: readonly CharacterDefinition[];
+  readonly equipment: Readonly<Record<string, CharacterEquipmentSelection>>;
+}
+export function workspaceDraftKey(mode: WorkspaceStorageMode = "experiment"): string {
+  return `${KEY}:${mode}`;
+}
+export function workspaceContextKey(mode: WorkspaceStorageMode): string {
+  return `${CONTEXT_PREFIX}:${mode}`;
+}
+export function clearWorkspaceStorage(storage: StorageLike | null, mode: WorkspaceStorageMode): void {
+  if (storage === null) return;
+  try {
+    storage.removeItem(workspaceDraftKey(mode));
+    storage.removeItem(workspaceContextKey(mode));
+    storage.removeItem(`genshin-team-equipment-v2:${mode}`);
+  } catch { /* session storage can be disabled; clearing is best effort */ }
+}
+export function saveWorkspaceImportContext(storage: StorageLike | null, mode: WorkspaceStorageMode, context: WorkspaceImportContext): void {
+  if (storage === null) return;
+  storage.setItem(workspaceContextKey(mode), JSON.stringify(context));
+  // An explicit import replaces this mode's configuration. Never let an older
+  // UID draft or loadout override the newly selected public characters.
+  storage.removeItem(workspaceDraftKey(mode));
+  storage.removeItem(equipmentStorageKey(mode));
+}
+export function loadWorkspaceImportContext(storage: StorageLike | null, mode: WorkspaceStorageMode): WorkspaceImportContext | null {
+  if (storage === null) return null;
+  try {
+    const value = JSON.parse(storage.getItem(workspaceContextKey(mode)) ?? "null") as unknown;
+    if (!isRecord(value) || typeof value.uid !== "string" || !Array.isArray(value.characters) || !Array.isArray(value.availableCharacters) || !isRecord(value.equipment)) return null;
+    if (value.characters.length > 4 || value.characters.some((character) => !isRecord(character) || !nonEmptyId(character.id))) return null;
+    if (value.availableCharacters.some((character) => !isRecord(character) || !nonEmptyId(character.id))) return null;
+    return value as unknown as WorkspaceImportContext;
+  } catch { return null; }
+}
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function nonEmptyId(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= 256; }
 function finiteTree(value: unknown, active = new Set<object>()): boolean {

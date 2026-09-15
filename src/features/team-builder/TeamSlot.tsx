@@ -589,15 +589,15 @@ export function EmptyTeamSlot({ slotIndex, onAdd, onMove }: EmptyProps) {
         }}
         aria-label={`添加角色至 ${slotNumber} 号位`}
         className={cn(
-          SLOT_MIN_HEIGHT,
-          "flex h-full w-full flex-col rounded-sm border border-dashed border-surface-border/80 bg-surface/30 p-5 text-left transition-colors duration-150 group hover:border-cyan-400/60 hover:bg-surface-raised/40",
+          "min-h-28 sm:min-h-48",
+          "flex h-full w-full flex-col gap-3 rounded-sm border border-dashed border-surface-border/80 bg-surface/30 p-4 text-left transition-colors duration-150 group hover:border-cyan-400/60 hover:bg-surface-raised/40",
           isDragOver && "ring-2 ring-amber-400 border-amber-400 bg-amber-950/20 scale-[1.02]",
           FOCUS_RING,
         )}
       >
         <span className="text-xs font-semibold text-slate-400">{slotNumber} 号位 · 空缺</span>
-          <span className="m-auto text-sm font-semibold text-slate-300 transition-colors group-hover:text-cyan-200">
-          + 配置出战角色
+        <span className="my-auto text-sm font-semibold text-slate-300 transition-colors group-hover:text-cyan-200 sm:mx-auto">
+          配置出战角色
         </span>
         <span className="text-xs text-slate-400">
           点击或拖拽角色至此

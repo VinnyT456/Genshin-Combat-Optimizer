@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import Page from "@/app/page";
+import Page from "@/features/workspace/WorkspacePage";
 import { findWeapon } from "@/game-data/weapons/registry";
 import { weaponPassiveBuffsById } from "@/game-data/weapons/weaponBuffs";
 import { artifactSetBonusBuffsBySetId } from "@/game-data/artifacts/setBonusBuffs";
@@ -33,7 +33,7 @@ import { allArtifacts } from "@/game-data/artifacts/registry";
 // in the suite.
 // ---------------------------------------------------------------------------
 
-const WORKSPACE_URL = "/?view=all";
+const WORKSPACE_URL = "/workspace?mode=experiment&view=all&team=raiden-shogun,bennett,xiangling,xingqiu";
 const RUN_LABEL = "执行循环模拟";
 const RERUN_LABEL = "重新执行战斗模拟";
 
@@ -42,8 +42,8 @@ const RERUN_LABEL = "重新执行战斗模拟";
  *
  * The Catch grants +DMG% and +CRIT Rate, doubling from R1 to R5, so both the
  * "equipping moves the number" and the "refinement moves the number" assertions
- * have something real to observe. It is a POLEARM because the default team's
- * slot 1 (Raiden) is a polearm user and the picker filters by weapon type — a
+ * have something real to observe. It is a POLEARM because the explicit fixture
+ * team's slot 1 (Raiden) is a polearm user and the picker filters by weapon type — a
  * weapon of the wrong type simply is not in the list, which would make this
  * test fail for a reason that has nothing to do with the wire under test.
  *
@@ -66,6 +66,9 @@ async function renderWorkspace() {
 
 /** Runs, or re-runs, and waits for the dashboard. */
 async function runSimulation() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "雷神国家队标准循环" }));
+  });
   const label = screen.queryByRole("button", { name: RERUN_LABEL })
     ? RERUN_LABEL
     : RUN_LABEL;

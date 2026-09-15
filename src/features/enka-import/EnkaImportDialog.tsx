@@ -19,6 +19,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCommit: (commit: EnkaCommit) => void;
+  readonly presentation?: "inline" | "entry";
+  readonly focusInputOnOpen?: boolean;
 }
 
 /**
@@ -26,7 +28,7 @@ interface Props {
  * instead of a modal: importing a roster is part of team setup, and the user
  * should be able to keep the team and the imported preview in context.
  */
-export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
+export function EnkaImportDialog({ open, onClose, onCommit, presentation = "inline", focusInputOnOpen = false }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<AbortController | null>(null);
   const [uid, setUid] = useState("");
@@ -34,6 +36,7 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [showValidation, setShowValidation] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -41,20 +44,23 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
       setState("idle");
       setPreview(null);
       setSelected([]);
-      inputRef.current?.focus();
+      setShowValidation(false);
+      if (presentation === "inline" || focusInputOnOpen) inputRef.current?.focus();
       return () => requestRef.current?.abort();
     }
     requestRef.current?.abort();
     requestRef.current = null;
-  }, [open]);
+  }, [focusInputOnOpen, open, presentation]);
 
   const valid = isValidEnkaUid(uid);
 
   async function load() {
     if (!valid) {
-      setMessage("请输入 9–10 位公开 UID");
+      setShowValidation(true);
+      inputRef.current?.focus();
       return;
     }
+    setShowValidation(false);
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
@@ -120,6 +126,7 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
       .map((character) => character.character!);
 
     onCommit({
+      uid: preview.uid,
       characters: chosen.map((character) => character.character!),
       availableCharacters,
       equipment: Object.fromEntries(
@@ -141,10 +148,15 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
   return (
     <div
       role="region"
-      aria-labelledby="enka-import-title"
-      className="mb-5 overflow-hidden rounded-sm border border-cyan-300/40 bg-surface-raised shadow-[inset_3px_0_0_rgba(34,211,238,0.55)]"
+      aria-labelledby={presentation === "inline" ? "enka-import-title" : undefined}
+      aria-label={presentation === "entry" ? "公开角色读取" : undefined}
+      className={cn(
+        presentation === "inline"
+          ? "mb-5 overflow-hidden rounded-sm border border-cyan-300/40 bg-surface-raised shadow-[inset_3px_0_0_rgba(34,211,238,0.55)]"
+          : "",
+      )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-surface-border bg-[#0f1723] px-4 py-3 sm:px-5">
+      {presentation === "inline" && <div className="flex flex-wrap items-start justify-between gap-3 border-b border-surface-border bg-[#0f1723] px-4 py-3 sm:px-5">
         <div className="flex items-start gap-3">
           <span
             aria-hidden="true"
@@ -169,10 +181,10 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
         >
           收起
         </Button>
-      </div>
+      </div>}
 
-      <div className="space-y-4 px-4 py-4 sm:px-5">
-        <LiveRegion message={message} />
+      <div className={cn("space-y-4", presentation === "inline" ? "px-4 py-4 sm:px-5" : "")}>
+        <LiveRegion message={state === "error" ? "" : message} />
         <form
           className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]"
           onSubmit={(event) => {
@@ -183,7 +195,7 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
           <div className="min-w-0 border-l-2 border-cyan-300/50 pl-3">
             <div className="mb-1.5 flex items-baseline gap-2">
               <label className="text-xs font-semibold text-slate-200" htmlFor="enka-uid">公开 UID</label>
-              <span className="font-mono text-micro text-slate-500">9–10 位数字</span>
+              <span className="text-micro text-slate-400"><span className="font-mono">9–10</span> 位数字</span>
             </div>
             <input
               ref={inputRef}
@@ -194,14 +206,22 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
               autoComplete="off"
               spellCheck={false}
               value={uid}
-              onChange={(event) =>
-                setUid(event.target.value.replace(/\D/g, "").slice(0, 10))
-              }
-              aria-invalid={uid.length > 0 && !valid}
-              aria-describedby={`enka-help${state === "error" ? " enka-error" : ""}`}
+              onChange={(event) => {
+                setUid(event.target.value.replace(/\D/g, "").slice(0, 10));
+                setShowValidation(false);
+                if (state === "error") {
+                  setState("idle");
+                  setMessage("");
+                }
+              }}
+              onBlur={() => {
+                if (uid.length > 0 && !valid) setShowValidation(true);
+              }}
+              aria-invalid={showValidation && !valid}
+              aria-describedby={`enka-help${showValidation && !valid ? " enka-invalid-error" : state === "error" ? " enka-error" : ""}`}
               placeholder="例如 987654321…"
               className={cn(
-                "min-w-0 w-full rounded-sm border border-surface-border bg-surface px-3 py-2.5 font-mono text-slate-100 placeholder:text-slate-600",
+                "min-h-11 min-w-0 w-full rounded-sm border border-surface-border bg-surface px-3 py-2.5 font-mono text-slate-100 placeholder:text-slate-400",
                 FOCUS_RING,
                 "focus:border-cyan-300",
               )}
@@ -211,18 +231,22 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
             type="submit"
             variant="primary"
             disabled={state === "loading"}
-            className="self-end px-5 lg:min-w-32"
+            className="min-h-11 self-end px-5 lg:min-w-32"
           >
             {state === "loading" ? "读取中…" : "读取角色"}
           </Button>
         </form>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-surface-border/70 pt-3">
-          <p id="enka-help" className="text-xs text-slate-500">
-            仅读取 Enka.Network 公开角色数据，不会保存 UID。请先在游戏内开启角色展示。
+          <p id="enka-help" className="text-xs text-slate-400">
+            UID 用于读取公开角色，并暂存于本次浏览会话；不会写入网址。请先在游戏内开启角色展示。
           </p>
-          <span className="font-mono text-micro text-slate-600">POST /api/enka/import</span>
         </div>
-        {state === "error" && (
+        {showValidation && !valid && (
+          <p id="enka-invalid-error" role="alert" className="border-l-2 border-amber-400/70 bg-amber-400/5 px-3 py-2 text-sm text-amber-200">
+            请输入 9–10 位公开 UID。
+          </p>
+        )}
+        {state === "error" && !(uid.length > 0 && !valid) && (
           <p id="enka-error" role="alert" className="border-l-2 border-red-400/70 bg-red-400/5 px-3 py-2 text-sm text-red-300">
             {message}
           </p>
@@ -279,8 +303,8 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
                       <span className="block truncate font-semibold">
                         {item.character ? charNameZh(item.character.name) : "未知角色"}
                       </span>
-                      <span className={cn("shrink-0 font-mono text-micro", selected.includes(item.key) ? "text-cyan-200" : "text-slate-600")}>
-                        {selected.includes(item.key) ? "SELECTED" : item.selectable ? "AVAILABLE" : "UNAVAILABLE"}
+                      <span className={cn("shrink-0 text-micro", selected.includes(item.key) ? "text-cyan-200" : "text-slate-400")}>
+                        {selected.includes(item.key) ? "已选择" : item.selectable ? "可选择" : "不可用"}
                       </span>
                     </span>
                     {item.character && (
@@ -294,12 +318,12 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
                         ? `天赋 ${item.talents.normal}/${item.talents.skill}/${item.talents.burst}`
                         : "天赋：暂不可用"}
                     </span>
-                    <span className="block text-xs text-slate-500">
+                    <span className="block text-xs text-slate-400">
                       {item.weapon
                         ? `武器：${item.weapon.name} Lv.${item.weapon.level} R${item.weapon.refinement}`
                         : "武器：未映射"}
                     </span>
-                    <span className="block text-xs text-slate-500">{item.artifactSummary}</span>
+                    <span className="block text-xs text-slate-400">{item.artifactSummary}</span>
                     {item.issues.map((issue) => (
                       <span key={issue} className="block text-xs text-amber-300">
                         {issue}
@@ -310,13 +334,16 @@ export function EnkaImportDialog({ open, onClose, onCommit }: Props) {
               ))}
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="secondary" onClick={onClose}>
+              <Button variant="secondary" className="min-h-11" onClick={onClose}>
                 取消
               </Button>
-              <Button variant="primary" onClick={commit} disabled={selected.length === 0}>
+              <Button variant="primary" className="min-h-11" onClick={commit} disabled={selected.length === 0}>
                 导入已选角色（{selected.length}）
               </Button>
             </div>
+            {selected.length === 0 && (
+              <p className="text-right text-xs text-amber-200" role="status">请至少选择 1 位角色。</p>
+            )}
           </>
         )}
       </div>

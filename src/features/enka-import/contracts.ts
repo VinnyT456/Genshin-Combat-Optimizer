@@ -38,6 +38,7 @@ export interface EnkaImportError {
 export type EnkaImportResult = EnkaImportResponse | EnkaImportError;
 
 export interface EnkaCommit {
+  readonly uid: string;
   readonly characters: readonly CharacterDefinition[];
   /** Every locally supported character returned by Enka, not just the team selection. */
   readonly availableCharacters: readonly CharacterDefinition[];

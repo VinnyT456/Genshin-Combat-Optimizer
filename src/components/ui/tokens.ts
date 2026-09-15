@@ -16,7 +16,7 @@ export const DISABLED = "disabled:opacity-60 disabled:cursor-not-allowed";
 
 /** Default card/panel shell: a quiet, sharp-edged workspace surface. */
 export const CARD =
-  "border border-surface-border/80 bg-surface-raised/80";
+  "border border-surface-border/70 bg-surface-raised";
 
 /** Minimum touch target (44x44 CSS px) for compact icon-only controls. */
 export const TOUCH_TARGET = "min-h-11 min-w-11 sm:min-h-0 sm:min-w-0";

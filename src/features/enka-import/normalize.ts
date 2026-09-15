@@ -10,6 +10,8 @@ export interface NormalizedEnkaArtifactStat {
 export interface NormalizedEnkaArtifact {
   readonly setId: number;
   readonly slot: ArtifactSlot;
+  /** Enka reports artifact levels as 1..21 (`21` means a level-20 piece). */
+  readonly level: number;
   readonly mainStat?: NormalizedEnkaArtifactStat;
   readonly substats: readonly NormalizedEnkaArtifactStat[];
 }
@@ -63,18 +65,45 @@ function artifactSlot(value: unknown): ArtifactSlot | undefined {
 
 function artifactStat(value: unknown): NormalizedEnkaArtifactStat | undefined {
   const item = record(value);
-  const propId = item?.mainPropId ?? item?.appendPropId;
-  const statValue = numericValue(item?.statValue);
+  // The live profile endpoint calls the value `statValue`, while the current
+  // API table documents it as `propValue`. Keep both at this boundary because
+  // saved responses and upstream deployments can contain either shape.
+  const propId = [
+    item?.mainPropId,
+    item?.appendPropId,
+    item?.appendPropID,
+    item?.lastestAffixId,
+    item?.propType,
+  ].find((candidate): candidate is string => typeof candidate === "string");
+  const statValue = numericValue(item?.statValue)
+    ?? numericValue(item?.propValue)
+    ?? numericValue(item?.value);
   return typeof propId === "string" && statValue !== undefined
     ? { propId, value: Number(statValue.toFixed(1)) }
     : undefined;
+}
+
+function artifactSetId(
+  flat: Record<string, unknown> | null,
+  reliquary: Record<string, unknown> | null,
+): number | undefined {
+  const direct = numericValue(flat?.setId) ?? numericValue(reliquary?.setId);
+  if (direct !== undefined && Number.isSafeInteger(direct)) return direct;
+
+  // `flat.setId` is present in current live responses. The icon is a stable
+  // fallback for older/cached payloads that only expose `UI_RelicIcon_<set>_<piece>`.
+  const icon = flat?.icon;
+  const match = typeof icon === "string" ? /^UI_RelicIcon_(\d+)(?:_[1-5])?$/.exec(icon) : null;
+  if (match === null) return undefined;
+  const parsed = Number(match[1]);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function normalizeArtifact(value: unknown): NormalizedEnkaArtifact | undefined {
   const item = record(value);
   const flat = record(item?.flat);
   const reliquary = record(item?.reliquary);
-  const setId = numericValue(flat?.setId);
+  const setId = artifactSetId(flat, reliquary);
   const slot = artifactSlot(flat?.equipType);
   if (setId === undefined || !Number.isInteger(setId) || slot === undefined || reliquary === null) {
     return undefined;
@@ -84,6 +113,7 @@ function normalizeArtifact(value: unknown): NormalizedEnkaArtifact | undefined {
   return {
     setId,
     slot,
+    level: boundedInt(reliquary.level, 1, 21, 1),
     ...(mainStat === undefined ? {} : { mainStat }),
     substats: rawSubstats.map(artifactStat).filter((stat): stat is NormalizedEnkaArtifactStat => stat !== undefined),
   };

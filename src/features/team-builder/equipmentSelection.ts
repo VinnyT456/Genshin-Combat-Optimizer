@@ -337,6 +337,9 @@ export function pruneSelections(
 
 /** Storage key. Bumped from `-v1` because the shape changed id/refinement. */
 export const EQUIPMENT_STORAGE_KEY = "genshin-team-equipment-v2";
+export function equipmentStorageKey(mode: "uid" | "experiment" = "experiment"): string {
+  return `${EQUIPMENT_STORAGE_KEY}:${mode}`;
+}
 
 interface PersistedEquipment {
   readonly version: 2;

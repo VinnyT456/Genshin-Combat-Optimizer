@@ -28,6 +28,7 @@ import type {
 
 /** Which top-level panels are visible. */
 export type AppView = "all" | "setup" | "results";
+export type WorkspaceMode = "uid" | "experiment";
 
 const VIEWS: readonly AppView[] = ["all", "setup", "results"];
 
@@ -40,6 +41,7 @@ export interface UrlState {
   readonly team: readonly (string | null)[];
   readonly filters: CharacterFilterState;
   readonly view: AppView;
+  readonly mode: WorkspaceMode;
 }
 
 const PARAM_TEAM = "team";
@@ -48,8 +50,10 @@ const PARAM_ELEMENT = "el";
 const PARAM_WEAPON = "wp";
 const PARAM_RARITY = "rr";
 const PARAM_QUERY = "q";
+const PARAM_MODE = "mode";
 
 const DEFAULT_VIEW: AppView = "all";
+const DEFAULT_MODE: WorkspaceMode = "experiment";
 
 export const DEFAULT_FILTERS: CharacterFilterState = {
   element: "all",
@@ -62,6 +66,7 @@ export const DEFAULT_URL_STATE: UrlState = {
   team: Array.from({ length: TEAM_SLOTS }, () => null),
   filters: DEFAULT_FILTERS,
   view: DEFAULT_VIEW,
+  mode: DEFAULT_MODE,
 };
 
 const ELEMENT_VALUES: readonly Element[] = [
@@ -86,6 +91,9 @@ const WEAPON_VALUES: readonly WeaponFilter[] = [
 function parseView(raw: string | null): AppView {
   if (raw === null) return DEFAULT_VIEW;
   return VIEWS.includes(raw as AppView) ? (raw as AppView) : DEFAULT_VIEW;
+}
+function parseMode(raw: string | null): WorkspaceMode {
+  return raw === "uid" ? "uid" : DEFAULT_MODE;
 }
 
 function parseElement(raw: string | null): ElementFilter {
@@ -133,6 +141,7 @@ export function decodeUrlState(search: string): UrlState {
       query: params.get(PARAM_QUERY) ?? "",
     },
     view: parseView(params.get(PARAM_VIEW)),
+    mode: parseMode(params.get(PARAM_MODE)),
   };
 }
 
@@ -162,6 +171,7 @@ export function encodeUrlState(state: UrlState): string {
   if (filters.rarity !== "all") params.set(PARAM_RARITY, String(filters.rarity));
   if (filters.query !== "") params.set(PARAM_QUERY, filters.query);
   if (state.view !== DEFAULT_VIEW) params.set(PARAM_VIEW, state.view);
+  if (state.mode !== DEFAULT_MODE) params.set(PARAM_MODE, state.mode);
 
   return params.toString();
 }

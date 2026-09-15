@@ -32,7 +32,7 @@ import { resolve } from "node:path";
 // they are NOT redundant. Do not delete this file wholesale.
 // ---------------------------------------------------------------------------
 
-const PAGE_PATH = resolve(process.cwd(), "src/app/page.tsx");
+const PAGE_PATH = resolve(process.cwd(), "src/features/workspace/WorkspacePage.tsx");
 const pageSource = readFileSync(PAGE_PATH, "utf8");
 
 /** The results block: everything the run's numbers are rendered inside. */

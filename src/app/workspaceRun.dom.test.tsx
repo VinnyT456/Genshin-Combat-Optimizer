@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import Page from "@/app/page";
+import Page from "@/features/workspace/WorkspacePage";
 
 // ---------------------------------------------------------------------------
 // RENDER TESTS for the run/staleness contract, replacing the parts of
@@ -17,7 +17,7 @@ import Page from "@/app/page";
 // mounting rather than clicking through the hub.
 // ---------------------------------------------------------------------------
 
-const WORKSPACE_URL = "/?view=all";
+const WORKSPACE_URL = "/workspace?mode=experiment&view=all&team=raiden-shogun,bennett,xiangling,xingqiu";
 const RUN_LABEL = "执行循环模拟";
 /**
  * The stale banner's own section heading. Matching the heading rather than the
@@ -27,6 +27,7 @@ const RUN_LABEL = "执行循环模拟";
 const STALE_SECTION = "测算状态提示";
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   window.history.replaceState(null, "", WORKSPACE_URL);
 });
 
@@ -38,6 +39,9 @@ async function renderWorkspace() {
 }
 
 async function runSimulation() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "雷神国家队标准循环" }));
+  });
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: RUN_LABEL }));
   });

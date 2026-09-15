@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import Page from "@/app/page";
+import Page from "@/features/workspace/WorkspacePage";
 import { mapEnkaPayload } from "@/features/enka-import/mapper";
 import { normalizeEnkaPayload } from "@/features/enka-import/normalize";
 
@@ -14,7 +14,7 @@ const avatar = (avatarId: number, level: number, equipList: readonly unknown[] =
 
 describe("Enka character-pool restriction", () => {
   beforeEach(() => {
-    window.history.replaceState(null, "", "/");
+    window.history.replaceState(null, "", "/workspace?mode=experiment");
     window.sessionStorage.clear();
     window.localStorage.clear();
     const preview = mapEnkaPayload(normalizeEnkaPayload({
@@ -46,6 +46,7 @@ describe("Enka character-pool restriction", () => {
     render(<Page />);
     await screen.findByRole("button", { name: "执行循环模拟" });
 
+    fireEvent.click(screen.getByRole("button", { name: "从 UID 导入" }));
     expect(screen.getByRole("region", { name: "从公开 UID 同步你的角色" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.change(screen.getByLabelText("公开 UID"), { target: { value: "987654321" } });

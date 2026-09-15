@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import Page from "@/app/page";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import Page from "@/features/workspace/WorkspacePage";
 
 // ---------------------------------------------------------------------------
 // RENDER TESTS for the single-page collapse (TASK #069).
@@ -26,7 +26,7 @@ import Page from "@/app/page";
 // ---------------------------------------------------------------------------
 
 /** The front door: no query string, no hash. */
-const ROOT_URL = "/";
+const ROOT_URL = "/workspace?mode=experiment";
 const RUN_LABEL = "执行循环模拟";
 const VIEW_SWITCHER_LABEL = "工作区视图";
 
@@ -41,6 +41,7 @@ const TIMELINE_SECTION = "动作时序与换人节奏";
 const BREAKDOWN_SECTION = "伤害多维拆解";
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   window.history.replaceState(null, "", ROOT_URL);
 });
 
@@ -66,9 +67,15 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     }
   });
 
-  it("starts with the Raiden National recommended builds", async () => {
+  it("starts with an empty team and rotation", async () => {
     await renderRoot();
-    expect(screen.getAllByText("符合 KQM 基准")).toHaveLength(4);
+    expect(screen.getByText("0/4")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^1 号位：/)).toBeNull();
+    const rotationHeading = screen.getByRole("heading", { name: "动作序列编排" });
+    const rotationHeader = rotationHeading.closest("div.border-b");
+    expect(rotationHeader?.textContent).toContain("已编排");
+    expect(rotationHeader?.textContent).toContain("0");
+    expect(screen.queryByText("符合 KQM 基准")).toBeNull();
   });
 
   it("reaches the results, breakdown and timeline without leaving the page", async () => {
@@ -79,6 +86,12 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     expect(screen.queryByRole("heading", { name: TIMELINE_SECTION })).toBeNull();
 
     await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "雷神国家队" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "雷神国家队标准循环" }));
+    });
+    await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: RUN_LABEL }));
     });
 
@@ -88,6 +101,24 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     for (const section of [RESULTS_SECTION, ENERGY_SECTION, TIMELINE_SECTION, BREAKDOWN_SECTION]) {
       expect(screen.getAllByRole("heading", { name: section }).length).toBeGreaterThan(0);
     }
+  });
+
+  it("calculates from the currently selected team", async () => {
+    await renderRoot();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "单人火系 (班尼特)" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "班尼特单人循环" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: RUN_LABEL }));
+    });
+    await screen.findByRole("heading", { name: RESULTS_SECTION });
+
+    expect(screen.getAllByText("班尼特").length).toBeGreaterThan(0);
+    expect(screen.queryByText("雷电将军")).toBeNull();
   });
 
   it("shows no navigation cards to the deleted routes", async () => {
@@ -135,6 +166,46 @@ describe("the surviving view switcher scopes the single page", () => {
     expect(screen.getByRole("button", { name: "数据看板", pressed: false })).toBeInTheDocument();
   });
 
+  it("uses the workspace rail to reveal and focus the empty results step", async () => {
+    await renderRoot();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /结果分析/ }));
+    });
+
+    expect(screen.getByRole("button", { name: "数据看板", pressed: true })).toBeInTheDocument();
+    expect(screen.getByText("尚未生成模拟结果")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(document.getElementById("result-heading"));
+    });
+  });
+
+  it("returns from the empty results view to setup and focuses its heading", async () => {
+    window.history.replaceState(null, "", `${ROOT_URL}&view=results`);
+    await renderRoot();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /队伍与装备/ }));
+    });
+
+    expect(screen.getByRole("button", { name: "战术配置", pressed: true })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(document.getElementById("team-heading"));
+    });
+  });
+
+  it("keeps one accessible primary run action and explains empty inputs", async () => {
+    await renderRoot();
+
+    expect(screen.getAllByRole("button", { name: RUN_LABEL })).toHaveLength(1);
+    expect(screen.getAllByText("请至少配置 1 位出战角色以进行战斗模拟。").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "单人火系 (班尼特)" }));
+    });
+    expect(screen.getByText("请在动作时序流中添加至少 1 个动作。")).toBeInTheDocument();
+  });
+
   it("moves the pressed state when a different view is chosen", async () => {
     await renderRoot();
     await act(async () => {
@@ -159,7 +230,7 @@ describe("the surviving view switcher scopes the single page", () => {
 
 describe("deep-link state survives the single-page collapse", () => {
   it("honours ?view=setup on load", async () => {
-    window.history.replaceState(null, "", "/?view=setup");
+    window.history.replaceState(null, "", "/workspace?mode=experiment&view=setup");
     await renderRoot();
 
     expect(screen.getByRole("heading", { name: TEAM_SECTION })).toBeInTheDocument();
@@ -168,7 +239,7 @@ describe("deep-link state survives the single-page collapse", () => {
 
   it("honours a ?team= deep link on load", async () => {
     // Positional encoding: slots 1 and 3 filled, slot 2 empty.
-    window.history.replaceState(null, "", "/?team=bennett,,xingqiu");
+    window.history.replaceState(null, "", "/workspace?mode=experiment&team=bennett,,xingqiu");
     await renderRoot();
 
     // The named characters reached the team builder's slots.
@@ -177,7 +248,7 @@ describe("deep-link state survives the single-page collapse", () => {
   });
 
   it("keeps the team deep link intact when the view changes", async () => {
-    window.history.replaceState(null, "", "/?team=bennett,,xingqiu");
+    window.history.replaceState(null, "", "/workspace?mode=experiment&team=bennett,,xingqiu");
     await renderRoot();
 
     await act(async () => {
