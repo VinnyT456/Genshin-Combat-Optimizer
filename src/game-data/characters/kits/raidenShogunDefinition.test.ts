@@ -1,9 +1,40 @@
 import { describe, expect, it } from "vitest";
+import { testEnemy } from "@/game-data";
+import { simulateRotation } from "@/simulation/engine";
+import type { CharacterSnapshot, SimulationSnapshot } from "@/types";
 import {
   RAIDEN_SHOGUN_KIT_METADATA,
   createRaidenShogunDefinition,
   raidenArtifactStateEffects,
 } from "./raidenShogunDefinition";
+
+const noCrit = { critMode: "never" as const };
+
+function damageFor(constellationLevel = 0, energyRecharge?: number) {
+  const base = createRaidenShogunDefinition(constellationLevel);
+  const character = energyRecharge === undefined
+    ? base
+    : { ...base, baseStats: { ...base.baseStats, energyRecharge } };
+  return simulateRotation(
+    [{ ...character, burst: { ...character.burst, energyCost: 0 } }],
+    [{ characterId: character.id, actionType: "burst" }],
+    testEnemy,
+    {
+      ...noCrit,
+      resumeFrom: fullEnergySnapshot(character),
+    },
+  );
+}
+
+function fullEnergySnapshot(character: ReturnType<typeof createRaidenShogunDefinition>): SimulationSnapshot {
+  const entry: CharacterSnapshot = {
+    characterId: character.id,
+    energy: { current: character.maxEnergy, max: character.maxEnergy, totalGained: character.maxEnergy, totalSpent: 0 },
+    cooldowns: {},
+    normalStringIndex: 0,
+  };
+  return { time: 0, activeCharacterId: character.id, characters: { [character.id]: entry } };
+}
 
 describe("Raiden Shogun generic kit data", () => {
   it("reuses sourced burst rows for the Dreams stance", () => {
@@ -86,5 +117,49 @@ describe("Raiden Shogun generic kit data", () => {
       amount: 2.4,
       energyRechargeScaling: { threshold: 1, ratio: 0.6 },
     });
+  });
+
+  it("executes the sourced burst multiplier as a deterministic baseline", () => {
+    const result = damageFor();
+
+    expect(result.errors).toEqual([]);
+    expect(result.damageByAbility["raiden-shogun-burst"]).toBeGreaterThan(0);
+  });
+
+  it("applies the sourced A4 Energy Recharge conversion to Electro damage", () => {
+    const ordinaryEr = damageFor(0, 1.32);
+    const boostedEr = damageFor(0, 2.32);
+    const ordinary = ordinaryEr.damageByAbility["raiden-shogun-burst"] ?? 0;
+    const boosted = boostedEr.damageByAbility["raiden-shogun-burst"] ?? 0;
+
+    expect(boosted).toBeGreaterThan(ordinary);
+  });
+
+  it("increases burst damage through supported C2 DEF ignore and C3 talent levels", () => {
+    const c0 = damageFor(0).damageByAbility["raiden-shogun-burst"] ?? 0;
+    const c2 = damageFor(2).damageByAbility["raiden-shogun-burst"] ?? 0;
+    const c3 = damageFor(3).damageByAbility["raiden-shogun-burst"] ?? 0;
+
+    expect(c2).toBeGreaterThan(c0);
+    expect(c3).toBeGreaterThan(c0);
+  });
+
+  it("adds cast-captured Resolve to the sourced initial burst hit", () => {
+    const noResolve = createRaidenShogunDefinition();
+    const withResolve = {
+      ...noResolve,
+      resources: noResolve.resources.map((resource) =>
+        resource.id === "raiden-resolve" ? { ...resource, initial: 20 } : resource,
+      ),
+    };
+    const rotation = [{ characterId: noResolve.id, actionType: "burst" as const }];
+    const run = (character: typeof noResolve) => simulateRotation(
+      [{ ...character, burst: { ...character.burst, energyCost: 0 } }],
+      rotation,
+      testEnemy,
+      { ...noCrit, resumeFrom: fullEnergySnapshot(character) },
+    ).damageByAbility["raiden-shogun-burst"] ?? 0;
+
+    expect(run(withResolve)).toBeGreaterThan(run(noResolve));
   });
 });

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import Page from "@/features/workspace/WorkspacePage";
+import { MINIMAL_RAIDEN_SEED, seedRotation } from "@/tests/helpers/seedRotation";
 import { findWeapon } from "@/game-data/weapons/registry";
 import { weaponPassiveBuffsById } from "@/game-data/weapons/weaponBuffs";
 import { artifactSetBonusBuffsBySetId } from "@/game-data/artifacts/setBonusBuffs";
@@ -66,9 +67,7 @@ async function renderWorkspace() {
 
 /** Runs, or re-runs, and waits for the dashboard. */
 async function runSimulation() {
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "雷神国家队标准循环" }));
-  });
+  await seedRotation(MINIMAL_RAIDEN_SEED);
   const label = screen.queryByRole("button", { name: RERUN_LABEL })
     ? RERUN_LABEL
     : RUN_LABEL;

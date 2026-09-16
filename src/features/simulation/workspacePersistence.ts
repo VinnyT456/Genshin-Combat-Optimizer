@@ -94,9 +94,23 @@ export function loadWorkspaceImportContext(storage: StorageLike | null, mode: Wo
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function nonEmptyId(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= 256; }
+/**
+ * Validates that every value the persisted format can express is representable.
+ *
+ * `undefined` is treated exactly as `JSON.stringify` treats it — as absence.
+ * An optional field that is explicitly present with the value `undefined`
+ * serializes to the same bytes as a missing key, so rejecting one while
+ * accepting the other would enforce a distinction the storage format cannot
+ * represent. Non-finite numbers (`NaN`, `±Infinity`) and cyclic structures are
+ * still rejected: the former round-trip to `null`, the latter make
+ * `JSON.stringify` throw.
+ *
+ * In an array, `undefined` stringifies to `null` rather than vanishing, which
+ * is a lossy but representable round-trip, so it is accepted there too.
+ */
 function finiteTree(value: unknown, active = new Set<object>()): boolean {
   if (typeof value === "number") return Number.isFinite(value);
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (value === undefined || value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value !== "object" || active.has(value)) return false;
   active.add(value);
   try {
@@ -134,6 +148,25 @@ export function serializeWorkspaceDraft(snapshot: WorkspaceDraftSnapshot): strin
   if (!validDraft(draft)) throw new TypeError("Workspace draft contains invalid IDs or values");
   return JSON.stringify({ version: WORKSPACE_SCHEMA_VERSION, ...draft });
 }
+/**
+ * Autosave-safe serializer: returns `null` for any snapshot that cannot be
+ * persisted, instead of throwing.
+ *
+ * The autosave effect runs on every state change, so a serialization failure
+ * there must degrade to "this draft was not saved" — a throw inside a
+ * `useEffect` escapes as an uncaught error and React unmounts the whole tree,
+ * turning a lost autosave into a blank page. The throwing
+ * `serializeWorkspaceDraft` remains for the replay-pack export path, where the
+ * user explicitly asked for a file and silence would be worse than an error.
+ */
+export function trySerializeWorkspaceDraft(snapshot: WorkspaceDraftSnapshot): string | null {
+  try {
+    return serializeWorkspaceDraft(snapshot);
+  } catch {
+    return null;
+  }
+}
+
 /** Migrate the explicitly tagged v0 shape; untagged data is rejected. */
 export function migrateWorkspaceDraft(raw: unknown): WorkspaceDraftSnapshot | null {
   if (!isRecord(raw) || (raw.version !== 0 && raw.version !== WORKSPACE_SCHEMA_VERSION)) return null;

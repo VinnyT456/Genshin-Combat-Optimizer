@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import Page from "@/features/workspace/WorkspacePage";
+import {
+  RAIDEN_NATIONAL_SEED,
+  SOLO_BENNETT_SEED,
+  seedRotation,
+} from "@/tests/helpers/seedRotation";
 
 // ---------------------------------------------------------------------------
 // RENDER TESTS for the single-page collapse (TASK #069).
@@ -73,8 +78,7 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     expect(screen.queryByLabelText(/^1 号位：/)).toBeNull();
     const rotationHeading = screen.getByRole("heading", { name: "动作序列编排" });
     const rotationHeader = rotationHeading.closest("div.border-b");
-    expect(rotationHeader?.textContent).toContain("已编排");
-    expect(rotationHeader?.textContent).toContain("0");
+    expect(rotationHeader?.textContent).toContain("共 0 个动作");
     expect(screen.queryByText("符合 KQM 基准")).toBeNull();
   });
 
@@ -88,9 +92,7 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "雷神国家队" }));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "雷神国家队标准循环" }));
-    });
+    await seedRotation(RAIDEN_NATIONAL_SEED);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: RUN_LABEL }));
     });
@@ -109,9 +111,7 @@ describe("the bare root renders the dashboard, not a launchpad", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "单人火系 (班尼特)" }));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "班尼特单人循环" }));
-    });
+    await seedRotation(SOLO_BENNETT_SEED);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: RUN_LABEL }));
     });

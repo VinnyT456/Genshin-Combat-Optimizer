@@ -35,6 +35,128 @@ export * from "./characters/kits/raidenNationalKit";
 export * from "./characters/kits/raidenShogunDefinition";
 export * from "./characters/kits/xingqiuDefinition";
 export * from "./characters/kits/xianglingDefinition";
+export * from "./characters/kits/alhaithamDefinition";
+export * from "./characters/kits/alyoshaDefinition";
+export * from "./characters/kits/aloyDefinition";
+export * from "./characters/kits/aratakiIttoDefinition";
+export * from "./characters/kits/baizhuDefinition";
+export * from "./characters/kits/beidouDefinition";
+export * from "./characters/kits/candaceDefinition";
+export * from "./characters/kits/charlotteDefinition";
+export * from "./characters/kits/chascaDefinition";
+export * from "./characters/kits/chioriDefinition";
+export * from "./characters/kits/chevreuseDefinition";
+export * from "./characters/kits/chongyunDefinition";
+export * from "./characters/kits/colleiDefinition";
+export * from "./characters/kits/clorindeDefinition";
+export * from "./characters/kits/dehyaDefinition";
+export * from "./characters/kits/citlaliDefinition";
+export * from "./characters/kits/cynoDefinition";
+export * from "./characters/kits/dilucDefinition";
+export * from "./characters/kits/dahliaDefinition";
+export * from "./characters/kits/dionaDefinition";
+export * from "./characters/kits/doriDefinition";
+export * from "./characters/kits/escoffierDefinition";
+export * from "./characters/kits/durinDefinition";
+export * from "./characters/kits/emilieDefinition";
+export * from "./characters/kits/eulaDefinition";
+export * from "./characters/kits/fischlDefinition";
+export * from "./characters/kits/faruzanDefinition";
+export * from "./characters/kits/flinsDefinition";
+export * from "./characters/kits/freminetDefinition";
+export * from "./characters/kits/furinaDefinition";
+export * from "./characters/kits/gamingDefinition";
+export * from "./characters/kits/ganyuDefinition";
+export * from "./characters/kits/gorouDefinition";
+export * from "./characters/kits/iansanDefinition";
+export * from "./characters/kits/ifaDefinition";
+export * from "./characters/kits/huTaoDefinition";
+export * from "./characters/kits/ineffaDefinition";
+export * from "./characters/kits/jahodaDefinition";
+export * from "./characters/kits/illugaDefinition";
+export * from "./characters/kits/jeanDefinition";
+export * from "./characters/kits/kachinaDefinition";
+export * from "./characters/kits/kaedeharaKazuhaDefinition";
+export * from "./characters/kits/kaeyaDefinition";
+export * from "./characters/kits/kamisatoAyakaDefinition";
+export * from "./characters/kits/kamisatoAyatoDefinition";
+export * from "./characters/kits/kavehDefinition";
+export * from "./characters/kits/kinichDefinition";
+export * from "./characters/kits/keqingDefinition";
+export * from "./characters/kits/kiraraDefinition";
+export * from "./characters/kits/kleeDefinition";
+export * from "./characters/kits/kujouSaraDefinition";
+export * from "./characters/kits/lanYanDefinition";
+export * from "./characters/kits/laumaDefinition";
+export * from "./characters/kits/kukiShinobuDefinition";
+export * from "./characters/kits/laylaDefinition";
+export * from "./characters/kits/linneaDefinition";
+export * from "./characters/kits/lisaDefinition";
+export * from "./characters/kits/lohenDefinition";
+export * from "./characters/kits/lynetteDefinition";
+export * from "./characters/kits/lyneyDefinition";
+export * from "./characters/kits/mavuikaDefinition";
+export * from "./characters/kits/monaDefinition";
+export * from "./characters/kits/mikaDefinition";
+export * from "./characters/kits/nahidaDefinition";
+export * from "./characters/kits/naviaDefinition";
+export * from "./characters/kits/mualaniDefinition";
+export * from "./characters/kits/neferDefinition";
+export * from "./characters/kits/nicoleDefinition";
+export * from "./characters/kits/neuvilletteDefinition";
+export * from "./characters/kits/nilouDefinition";
+export * from "./characters/kits/ningguangDefinition";
+export * from "./characters/kits/noelleDefinition";
+export * from "./characters/kits/odetteDefinition";
+export * from "./characters/kits/pruneDefinition";
+export * from "./characters/kits/ororonDefinition";
+export * from "./characters/kits/qiqiDefinition";
+export * from "./characters/kits/rosariaDefinition";
+export * from "./characters/kits/razorDefinition";
+export * from "./characters/kits/sandroneDefinition";
+export * from "./characters/kits/sangonomiyaKokomiDefinition";
+export * from "./characters/kits/sayuDefinition";
+export * from "./characters/kits/sethosDefinition";
+export * from "./characters/kits/shenheDefinition";
+export * from "./characters/kits/shikanoinHeizouDefinition";
+export * from "./characters/kits/sigewinneDefinition";
+export * from "./characters/kits/skirkDefinition";
+export * from "./characters/kits/sucroseDefinition";
+export * from "./characters/kits/tartagliaDefinition";
+export * from "./characters/kits/thomaDefinition";
+export * from "./characters/kits/tighnariDefinition";
+export * from "./characters/kits/varesaDefinition";
+export * from "./characters/kits/varkaDefinition";
+export * from "./characters/kits/ventiDefinition";
+export * from "./characters/kits/wandererDefinition";
+export * from "./characters/kits/wriothesleyDefinition";
+export * from "./characters/kits/xianyunDefinition";
+export * from "./characters/kits/xiaoDefinition";
+export * from "./characters/kits/xilonenDefinition";
+export * from "./characters/kits/xinyanDefinition";
+export * from "./characters/kits/yaeMikoDefinition";
+export * from "./characters/kits/yanfeiDefinition";
+export * from "./characters/kits/yaoyaoDefinition";
+export * from "./characters/kits/yelanDefinition";
+export * from "./characters/kits/yoimiyaDefinition";
+export * from "./characters/kits/yumemizukiMizukiDefinition";
+export * from "./characters/kits/yunJinDefinition";
+export * from "./characters/kits/zhongliDefinition";
+export * from "./characters/kits/zibaiDefinition";
+export * from "./characters/kits/travelerFAnemoDefinition";
+export * from "./characters/kits/travelerFCryoDefinition";
+export * from "./characters/kits/travelerFDendroDefinition";
+export * from "./characters/kits/travelerFElectroDefinition";
+export * from "./characters/kits/travelerFGeoDefinition";
+export * from "./characters/kits/travelerFHydroDefinition";
+export * from "./characters/kits/travelerFPyroDefinition";
+export * from "./characters/kits/travelerMAnemoDefinition";
+export * from "./characters/kits/travelerMCryoDefinition";
+export * from "./characters/kits/travelerMDendroDefinition";
+export * from "./characters/kits/travelerMElectroDefinition";
+export * from "./characters/kits/travelerMGeoDefinition";
+export * from "./characters/kits/travelerMHydroDefinition";
+export * from "./characters/kits/travelerMPyroDefinition";
 
 /**
  * Playable roster, adapted to the legacy `CharacterDefinition` shape for UI
@@ -146,6 +268,15 @@ export const teamRotation: Rotation = [
   { characterId: "test-electro", actionType: "burst", abilityId: "test-electro-q" },
 ];
 
+/**
+ * Assembled UI-facing preset shape.
+ *
+ * DELIBERATELY has zero importers since COMPONENTS.md §14.10 removed the
+ * rotation-preset buttons from `RotationEditor`. It is kept as the seam for a
+ * future opt-in presets surface; `nationalRotation` and `sampleRotation` below
+ * it remain load-bearing test fixtures (determinism corpus + runtime stress).
+ * Do not delete either to "clean up" this array.
+ */
 export const ROTATION_PRESETS: readonly RotationPreset[] = [
   {
     id: "national-team",

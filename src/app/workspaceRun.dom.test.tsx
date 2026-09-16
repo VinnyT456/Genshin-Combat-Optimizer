@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import Page from "@/features/workspace/WorkspacePage";
+import { SHORT_TWO_CHARACTER_SEED, seedRotation } from "@/tests/helpers/seedRotation";
 
 // ---------------------------------------------------------------------------
 // RENDER TESTS for the run/staleness contract, replacing the parts of
@@ -39,9 +40,7 @@ async function renderWorkspace() {
 }
 
 async function runSimulation() {
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "雷神国家队标准循环" }));
-  });
+  await seedRotation(SHORT_TWO_CHARACTER_SEED);
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: RUN_LABEL }));
   });

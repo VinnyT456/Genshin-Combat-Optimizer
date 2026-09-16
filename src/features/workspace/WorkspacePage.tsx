@@ -18,8 +18,10 @@ import {
   teamFrom,
 } from "@/features/team-builder/teamModel";
 import { EnemyConfigurator } from "@/features/setup/EnemyConfigurator";
-import { SimulationSettings } from "@/features/setup/SimulationSettings";
+import { GlobalRulesBar } from "@/features/setup/GlobalRulesBar";
 import { RotationEditor } from "@/features/setup/RotationEditor";
+import { RotationFeasibility } from "@/features/setup/RotationFeasibility";
+import { DEFAULT_EDITOR_SWAP_COST_SECONDS } from "@/features/setup/rotationEditing";
 import { runSimulation } from "@/features/simulation/simulationAdapter";
 import { useUrlState } from "@/features/simulation/useUrlState";
 import {
@@ -100,7 +102,7 @@ import {
   resonanceShortDescZh,
   resonanceFullDescZh,
 } from "@/lib/i18n";
-import { loadWorkspaceImportContext, parseWorkspaceDraft, saveWorkspaceImportContext, serializeWorkspaceDraft, workspaceDraftKey } from "@/features/simulation/workspacePersistence";
+import { loadWorkspaceImportContext, parseWorkspaceDraft, saveWorkspaceImportContext, trySerializeWorkspaceDraft, workspaceDraftKey } from "@/features/simulation/workspacePersistence";
 import { EnkaImportDialog } from "@/features/enka-import/EnkaImportDialog";
 import type { EnkaCommit } from "@/features/enka-import/contracts";
 import { WorkspaceNavigation, type WorkspaceTarget } from "./WorkspaceNavigation";
@@ -202,7 +204,7 @@ export default function WorkspacePage() {
   const [rotation, setRotation] = useState<Rotation>([]);
   const [simConfig, setSimConfig] = useState<Partial<SimulationConfig>>({
     critMode: "expected",
-    swapCost: 0.6,
+    swapCost: DEFAULT_EDITOR_SWAP_COST_SECONDS,
   });
 
   const [announcement, setAnnouncement] = useState("");
@@ -302,14 +304,24 @@ export default function WorkspacePage() {
   }, [roster, mode, urlHydrated]);
   useEffect(() => {
     if (!draftHydrated || readyMode !== mode) return;
-    window.sessionStorage.setItem(workspaceDraftKey(mode), serializeWorkspaceDraft({ team, enemy, rotation, simConfig, searchBudget, searchObjective, searchDuration }));
+    // Autosave is best effort. A draft that cannot be serialized, or storage
+    // that is full or disabled, must cost at most one unsaved draft — never
+    // the page. A throw here escapes the effect and unmounts the tree.
+    const serialized = trySerializeWorkspaceDraft({ team, enemy, rotation, simConfig, searchBudget, searchObjective, searchDuration });
+    if (serialized === null) return;
+    try {
+      window.sessionStorage.setItem(workspaceDraftKey(mode), serialized);
+    } catch { /* quota exceeded or storage disabled; the draft stays in memory */ }
   }, [draftHydrated, mode, readyMode, team, enemy, rotation, simConfig, searchBudget, searchObjective, searchDuration]);
   useEffect(() => {
     if (!draftHydrated || readyMode !== mode) return;
-    window.sessionStorage.setItem(
-      equipmentStorageKey(mode),
-      serializeSelections(equipment),
-    );
+    // Same contract as the draft autosave above: best effort, never fatal.
+    try {
+      window.sessionStorage.setItem(
+        equipmentStorageKey(mode),
+        serializeSelections(equipment),
+      );
+    } catch { /* quota exceeded or storage disabled; equipment stays in memory */ }
   }, [draftHydrated, equipment, mode, readyMode]);
 
   const setView = useCallback(
@@ -442,6 +454,12 @@ export default function WorkspacePage() {
     () => isRunStale(run, liveInputs),
     [run, liveInputs],
   );
+
+  // The swap cost the editor must price a swap at (§15.3/G4). It is read from
+  // the same `simConfig` the run is executed with, so the editor's 总时长 and
+  // the engine's clock can no longer disagree about one concept.
+  const effectiveEditorSwapCost =
+    simConfig.swapCost ?? DEFAULT_EDITOR_SWAP_COST_SECONDS;
 
   // `resolveDashboardState` already encoded this branch table and was fully
   // tested, but nothing rendered it — the page reimplemented the logic inline.
@@ -885,24 +903,47 @@ export default function WorkspacePage() {
           </Section>
           {/* 2. Setup Section: Configurable Enemy, Sim Settings & Rotation Editor */}
           <Section title="战斗环境与动作时序编排" id="setup-heading">
-            <div className="grid gap-6 lg:grid-cols-12">
-              {/* Left Column: Target Enemy & Sim Parameters */}
-              <div className="flex flex-col gap-6 lg:col-span-4">
-                <EnemyConfigurator
-                enemy={enemy}
-                onChange={handleEnemyChange}
-                referenceLevel={referenceCharacterLevel(team)}
-              />
-                <SimulationSettings config={simConfig} onChange={handleConfigChange} />
-              </div>
+            {/* Reading order is DOM order, with no `order-*` utilities (§15.8):
+                rules → enemy → sequence → feasibility. */}
+            <div className="flex flex-col gap-6">
+              {/* Section-wide rules. Full width and first, because they govern
+                  every number below them (§15.2/1). */}
+              <GlobalRulesBar config={simConfig} onChange={handleConfigChange} />
 
-              {/* Right Column: Interactive Rotation Sequencer */}
-              <div className="lg:col-span-8">
-                <RotationEditor
-                  rotation={rotation}
-                  onRotationChange={handleRotationChange}
-                  team={team}
-                />
+              {/* `lg:items-start` is what closes the measured 140px gap: it was
+                  never missing content, it was a stretched grid item (§15.7/H1). */}
+              <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
+                {/* Left Column: the scenario — one card (§15.2/2). */}
+                <div className="lg:col-span-4">
+                  <EnemyConfigurator
+                    enemy={enemy}
+                    onChange={handleEnemyChange}
+                    referenceLevel={referenceCharacterLevel(team)}
+                  />
+                </div>
+
+                {/* Right Column: Interactive Rotation Sequencer */}
+                <div className="flex flex-col gap-6 lg:col-span-8">
+                  <RotationEditor
+                    rotation={rotation}
+                    onRotationChange={handleRotationChange}
+                    team={team}
+                    swapCost={effectiveEditorSwapCost}
+                  />
+                  {/* Renders nothing for an empty sequence or no team (§15.5). */}
+                  <RotationFeasibility
+                    rotation={rotation}
+                    team={team}
+                    // Only a FRESH run may supply a verdict. A verdict computed
+                    // for a different sequence is worse than no verdict, so a
+                    // stale result drops the panel back to demand-only.
+                    runWarnings={
+                      resultStale || run === null
+                        ? null
+                        : run.result.structuredWarnings
+                    }
+                  />
+                </div>
               </div>
             </div>
           </Section>

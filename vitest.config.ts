@@ -22,13 +22,31 @@ const alias = { "@": resolve(__dirname, "./src") };
 // with no JSX handling. React 19 uses the automatic runtime.
 const esbuild = { jsx: "automatic" } as const;
 
+/**
+ * Suite-wide budget, in milliseconds, replacing vitest's 5s default.
+ *
+ * Measured, not guessed: the heaviest DOM tests render the whole workspace and
+ * take 1-3.4s in isolation, but 3-5x that when the pool runs files in parallel
+ * on a loaded machine. Adding two DOM files was enough to push eleven unrelated
+ * pre-existing tests past 5s — every one a timeout with zero assertion
+ * failures. The budget belongs at the suite level, not patched onto whichever
+ * test happened to lose the race, which would only hide the next one. This is
+ * still far below any real hang.
+ */
+const TEST_TIMEOUT_MS = 20_000;
+
+/** Projects do NOT inherit the root `test` block, so the budget is set on each. */
+const timeouts = { testTimeout: TEST_TIMEOUT_MS, hookTimeout: TEST_TIMEOUT_MS } as const;
+
 export default defineConfig({
   test: {
+    ...timeouts,
     projects: [
       {
         resolve: { alias },
         esbuild,
         test: {
+          ...timeouts,
           name: "node",
           include: NODE_TESTS,
           exclude: ["**/node_modules/**", DOM_TESTS],
@@ -39,6 +57,7 @@ export default defineConfig({
         resolve: { alias },
         esbuild,
         test: {
+          ...timeouts,
           name: "dom",
           include: [DOM_TESTS],
           environment: "jsdom",

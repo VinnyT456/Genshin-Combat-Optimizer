@@ -56,4 +56,67 @@ describe("Bennett Fantastic Voyage runtime field", () => {
     const c1Hit = c1.timeline.find((event) => event.type === "damage" && event.characterId === testPyro.id);
     expect(c1Hit?.damage?.finalDamage).toBeGreaterThan(c0Hit?.damage?.finalDamage ?? 0);
   });
+
+  it("applies Rekindle's 20% skill cooldown reduction only after ascension 1", () => {
+    const unlocked = createBennettDefinition(0, undefined, { ascensionPhase: 1 });
+    const locked = createBennettDefinition(0, undefined, { ascensionPhase: 0 });
+    expect(unlocked.skill.cooldown.values[0]).toBeCloseTo(4, 8);
+    expect(locked.skill.cooldown.values[0]).toBeCloseTo(5, 8);
+  });
+
+  it("applies C2's 30% ER bonus when Bennett starts below 70% HP", () => {
+    const c0 = createBennettDefinition(0, { normal: 1, skill: 1, burst: 1 });
+    const c2 = createBennettDefinition(2, { normal: 1, skill: 1, burst: 1 });
+    const lowHp = {
+      timestamp: 0,
+      sourceCharacterId: "bennett",
+      targetCharacterId: "bennett",
+      resourceId: "damageTaken" as const,
+      kind: "gain" as const,
+      amount: c0.baseStats.hp * 0.4,
+    };
+    const c0Result = simulateRotation([c0], [{ characterId: c0.id, actionType: "skill" }], testEnemy, {
+      resourceEvents: [lowHp],
+    });
+    const c2Result = simulateRotation([c2], [{ characterId: c2.id, actionType: "skill" }], testEnemy, {
+      resourceEvents: [lowHp],
+    });
+    expect(c2Result.finalState?.characters[c2.id]?.energy.current).toBeGreaterThan(
+      c0Result.finalState?.characters[c0.id]?.energy.current ?? 0,
+    );
+  });
+
+  it("raises Passion Overload damage through C3's sourced skill talent boost", () => {
+    const c0 = createBennettDefinition(0, { normal: 1, skill: 10, burst: 1 });
+    const c3 = createBennettDefinition(3, { normal: 1, skill: 10, burst: 1 });
+    const rotation = [{ characterId: c0.id, actionType: "skill" as const }];
+    const c0Hit = simulateRotation([c0], rotation, testEnemy).timeline.find((e) => e.type === "damage");
+    const c3Hit = simulateRotation([c3], [{ characterId: c3.id, actionType: "skill" }], testEnemy)
+      .timeline.find((e) => e.type === "damage");
+    expect(c3Hit?.damage?.finalDamage).toBeGreaterThan(c0Hit?.damage?.finalDamage ?? 0);
+  });
+
+  it("raises Fantastic Voyage damage through C5's sourced burst talent boost", () => {
+    const c0 = createBennettDefinition(0, { normal: 1, skill: 1, burst: 10 });
+    const c5 = createBennettDefinition(5, { normal: 1, skill: 1, burst: 10 });
+    const c0Ready = { ...c0, burst: { ...c0.burst, energyCost: 0 } };
+    const c5Ready = { ...c5, burst: { ...c5.burst, energyCost: 0 } };
+    const c0Hit = simulateRotation([c0Ready], [{ characterId: c0.id, actionType: "burst" }], testEnemy)
+      .timeline.find((e) => e.type === "damage");
+    const c5Hit = simulateRotation([c5Ready], [{ characterId: c5.id, actionType: "burst" }], testEnemy)
+      .timeline.find((e) => e.type === "damage");
+    expect(c5Hit?.damage?.finalDamage).toBeGreaterThan(c0Hit?.damage?.finalDamage ?? 0);
+  });
+
+  it("applies C6's Pyro field bonus to Bennett's sword damage", () => {
+    const c0 = createBennettDefinition(1, { normal: 1, skill: 1, burst: 1 });
+    const c6 = createBennettDefinition(6, { normal: 1, skill: 1, burst: 1 });
+    const c0Ready = { ...c0, burst: { ...c0.burst, energyCost: 0 } };
+    const c6Ready = { ...c6, burst: { ...c6.burst, energyCost: 0 } };
+    const c0Result = simulateRotation([c0Ready], [{ characterId: c0.id, actionType: "burst" }], testEnemy);
+    const c6Result = simulateRotation([c6Ready], [{ characterId: c6.id, actionType: "burst" }], testEnemy);
+    const c0Hit = c0Result.timeline.find((e) => e.type === "damage");
+    const c6Hit = c6Result.timeline.find((e) => e.type === "damage");
+    expect(c6Hit?.damage?.finalDamage).toBeGreaterThan(c0Hit?.damage?.finalDamage ?? 0);
+  });
 });

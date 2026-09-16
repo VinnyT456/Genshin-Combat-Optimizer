@@ -45,7 +45,88 @@ describe("simulationAdapter — website character wiring", () => {
     expect(engineCharacter.constellationLevel).toBe(3);
     expect(engineCharacter.talentLevels).toEqual({ normal: 8, skill: 10, burst: 9 });
     expect(engineCharacter.passives).toBe(bennett.engineDefinition.passives);
-    expect(engineCharacter.constellations).toBe(bennett.engineDefinition.constellations);
+    expect(engineCharacter.constellations.map(({ id }) => id)).toEqual(
+      bennett.engineDefinition.constellations.map(({ id }) => id),
+    );
+  });
+
+  it("routes supported roster characters through their runtime kit definitions", () => {
+    for (const id of [
+      "qiqi",
+      "raiden-shogun",
+      "razor",
+      "rosaria",
+      "sandrone",
+      "sangonomiya-kokomi",
+      "sayu",
+      "sethos",
+      "shenhe",
+      "shikanoin-heizou",
+      "sigewinne",
+      "skirk",
+      "sucrose",
+      "tartaglia",
+      "thoma",
+      "tighnari",
+      "varesa",
+      "varka",
+      "venti",
+      "wanderer",
+      "wriothesley",
+      "xiangling",
+      "xianyun",
+      "xiao",
+      "xilonen",
+      "xinyan",
+      "yae-miko",
+      "yanfei",
+      "yaoyao",
+      "yelan",
+      "yoimiya",
+      "yumemizuki-mizuki",
+      "yun-jin",
+      "zhongli",
+      "zibai",
+      "traveler-f-anemo",
+      "traveler-f-cryo",
+      "traveler-f-dendro",
+      "traveler-f-electro",
+      "traveler-f-geo",
+      "traveler-f-hydro",
+      "traveler-f-pyro",
+      "traveler-m-anemo",
+      "traveler-m-cryo",
+      "traveler-m-dendro",
+      "traveler-m-electro",
+      "traveler-m-geo",
+      "traveler-m-hydro",
+      "traveler-m-pyro",
+    ] as const) {
+      const source = allCharacters.find((character) => character.id === id);
+      expect(source, `${id} should exist in the roster`).toBeDefined();
+      const websiteCharacter = toWebsiteCharacter(source!);
+      const edited = {
+        ...websiteCharacter,
+        baseStats: { ...websiteCharacter.baseStats, atk: 1234 },
+        constellation: 3,
+        talentLevels: { normal: 8, skill: 9, burst: 10 },
+      };
+      const adapted = toEngineCharacter(edited);
+
+      expect("normalAttacks" in adapted).toBe(true);
+      if (!("normalAttacks" in adapted)) throw new Error(`expected ${id} generic definition`);
+      expect(adapted.constellationLevel).toBe(3);
+      expect(adapted.talentLevels).toEqual({ normal: 8, skill: 9, burst: 10 });
+      expect(adapted.baseStats.atk).toBe(1234);
+
+      const result = runSimulation({
+        team: [edited],
+        rotation: [{ characterId: id, actionType: "normal" }],
+        enemy: testEnemy,
+      }).result;
+      expect(result.errors, `${id} adapter simulation should have no errors`).toEqual([]);
+      expect(result.damageByCharacter[id]).toBeGreaterThan(0);
+    }
   });
 
   it("does not apply a burst-only constellation boost to the skill", () => {

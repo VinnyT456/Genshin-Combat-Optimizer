@@ -3,7 +3,12 @@
 import { useId } from "react";
 import type { Element, EnemyState } from "@/types";
 import { cn } from "@/components/ui/cn";
-import { CARD, FOCUS_RING, TRANSITION_COLORS } from "@/components/ui/tokens";
+import {
+  CARD,
+  FOCUS_RING,
+  TOUCH_TARGET,
+  TRANSITION_COLORS,
+} from "@/components/ui/tokens";
 import { fmtPercent } from "@/lib/format";
 import { previewMitigation } from "@/features/simulation/simulationAdapter";
 
@@ -85,6 +90,13 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
           <span className="text-xs text-slate-400">单目标木桩</span>
         </div>
 
+        {/* Zone 1 — inputs (§15.4/N1). The rule matches the derived zone's, so
+            the enemy name line above reads as a card-identity band rather than
+            as the head of this zone: three bands, symmetric boundaries. */}
+        <div className="border-t border-surface-border pt-3">
+          <p className="text-micro text-slate-400">场景输入</p>
+        </div>
+
         {/* Level input */}
         <div className="flex items-center justify-between gap-3 text-xs">
           <label htmlFor={levelId} className="text-slate-300">
@@ -96,6 +108,7 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
               onClick={() => handleLevelChange(enemy.level - 5)}
               className={cn(
                 "h-7 w-7 rounded-sm border border-surface-border bg-surface text-center hover:bg-surface-hover",
+                TOUCH_TARGET,
                 TRANSITION_COLORS,
                 FOCUS_RING,
               )}
@@ -120,6 +133,7 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
               onClick={() => handleLevelChange(enemy.level + 5)}
               className={cn(
                 "h-7 w-7 rounded-sm border border-surface-border bg-surface text-center hover:bg-surface-hover",
+                TOUCH_TARGET,
                 TRANSITION_COLORS,
                 FOCUS_RING,
               )}
@@ -158,6 +172,13 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
           </div>
         </div>
 
+        {/* Zone 2 — derived readout (§15.4/N1). The label is the fix for E4:
+            it states that this is a result, not a fourth control. It keeps its
+            place in the empty-team state so the structure does not shift when a
+            team arrives (N6). */}
+        <div className="border-t border-surface-border pt-3">
+          <p className="mb-1.5 text-micro text-slate-400">由上述输入推导</p>
+
         {/* Enemy mitigation preview — engine formulas via the adapter. */}
         {mitigation === null ? (
           <p className="rounded-sm border border-surface-border bg-surface p-2.5 text-micro text-slate-400">
@@ -171,7 +192,11 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
                 {fmtPercent(mitigation.totalMultiplier)}
               </span>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-raised">
+            {/* N5 — decorative; the percentage above is the accessible value. */}
+            <div
+              aria-hidden="true"
+              className="h-1.5 w-full overflow-hidden rounded-full bg-surface-raised"
+            >
               <div
                 className="h-full bg-cyan-300"
                 style={{
@@ -185,6 +210,7 @@ export function EnemyConfigurator({ enemy, onChange, referenceLevel }: Props) {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

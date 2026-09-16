@@ -32,22 +32,6 @@ export function createXingqiuDefinition(
     cooldown: { values: [0] },
     energyCost: 0,
     instances: [rainHit],
-    ...(level >= 2
-      ? {
-          buffs: [
-            {
-              id: "xingqiu-c2-hydro-shred",
-              source: "天青现虹",
-              sourceCharacterId: "xingqiu",
-              startTime: 0,
-              duration: 4,
-              stacking: { mode: "refresh" as const },
-              targets: { scope: "party" as const },
-              enemyModifiers: [{ key: "resReduction" as const, element: "hydro" as const, value: 0.15 }],
-            } satisfies Buff,
-          ],
-        }
-      : {}),
   };
 
   const burstBuffs: readonly Buff[] | undefined = level >= 4
@@ -110,6 +94,24 @@ export function createXingqiuDefinition(
           sourceCharacterId: "xingqiu",
           snapshotMode: "cast",
           ability: rainAbility,
+          ...(level >= 2
+            ? {
+                buffs: [
+                  {
+                    id: "xingqiu-c2-hydro-shred",
+                    source: "天青现虹",
+                    sourceCharacterId: "xingqiu",
+                    startTime: 0,
+                    duration: 4,
+                    stacking: { mode: "refresh" as const },
+                    targets: { scope: "party" as const },
+                    enemyModifiers: [
+                      { key: "resReduction" as const, element: "hydro" as const, value: 0.15 },
+                    ],
+                  } satisfies Buff,
+                ],
+              }
+            : {}),
         },
       ],
     },

@@ -61,34 +61,14 @@ export function createXianglingDefinition(
   return {
     ...xiangling,
     constellationLevel: level,
-    // C1 starts a six-second Pyro RES shred after Guoba's skill resolves.
-    // The generic post-cast buff seam keeps the window finite and avoids the
-    // old National compatibility path's permanent shred.
-    skill:
-      level >= 1
-        ? {
-            ...xiangling.skill,
-            buffs: [
-              {
-                id: "xiangling-c1-pyro-shred",
-                source: "外酥里嫩",
-                sourceCharacterId: "xiangling",
-                startTime: 0,
-                duration: 6,
-                stacking: { mode: "refresh" as const },
-                targets: { scope: "party" as const },
-                enemyModifiers: [
-                  { key: "resReduction" as const, element: "pyro" as const, value: 0.15 },
-                ],
-              },
-            ],
-          }
-        : xiangling.skill,
-    // Only the opening swing is part of the burst cast. Contact hits are
-    // emitted by the generic interval trigger above.
+    // C1 is intentionally not emitted as a cast buff: its source requires
+    // Guoba to hit an opponent, while this ability-level seam has no hit gate.
+    // The generated burst contains three separate opening swing hits followed
+    // by the recurring Pyronado hit. Keep the sourced opening rows on the cast;
+    // contact hits are emitted by the generic interval trigger above.
     burst: {
       ...xiangling.burst,
-      instances: [xiangling.burst.instances[0] ?? sourceHit],
+      instances: xiangling.burst.instances.slice(0, 3),
       ...(level >= 6
         ? {
             buffs: [
@@ -111,5 +91,13 @@ export function createXianglingDefinition(
     },
   };
 }
+
+/** Source-backed perks not executable through the current generic kit seams. */
+export const XIANGLING_UNSUPPORTED_MECHANICS = [
+  "c1GuobaHitGatedPyroResistanceReduction",
+  "a4PickupTriggeredAttackBonus",
+  "c2NormalStringEndExplosion",
+  "a1GuobaFlameRange",
+] as const;
 
 export const xianglingWithKit = createXianglingDefinition();
