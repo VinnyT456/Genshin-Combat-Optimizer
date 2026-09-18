@@ -14,6 +14,7 @@ import type {
 import { getActiveBuffs } from "@/simulation/buffs/getActiveBuffs";
 import {
   foldBuffsIntoStats,
+  applyResourceModifiers,
   sumActiveCharacterDefense,
   sumActiveHealing,
   sumActiveEnemyModifiers,
@@ -115,8 +116,9 @@ export function makeBuffResolver(options: MakeBuffResolverOptions): BuffResolver
     // The id-keyed map is passed as the FALLBACK only; `foldBuffsIntoStats`
     // applies `resolveBaseValues`, under which `base.base` takes precedence.
     const explicitBaseValues = baseStats[context.character.id] ?? {};
+    const withStatic = foldBuffsIntoStats(base, active, explicitBaseValues);
     return applyEnergyCostDmgBonuses(
-      foldBuffsIntoStats(base, active, explicitBaseValues),
+      applyResourceModifiers(withStatic, active, context, explicitBaseValues),
       active,
       context.ability,
     );

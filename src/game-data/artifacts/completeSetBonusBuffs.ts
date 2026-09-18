@@ -25,7 +25,7 @@ function makeBuff(
   source: string,
   modifiers: readonly StatModifier[],
   conditions?: BuffCondition,
-  scope: "active" | "party" = "active",
+  scope: "self" | "party" = "self",
   conversions?: readonly StatConversionModifier[],
 ): Buff {
   return {
@@ -47,7 +47,7 @@ function dmg(
   value: number,
   damageTypes?: BuffCondition["damageTypes"],
   extra?: Omit<BuffCondition, "damageTypes">,
-  scope: "active" | "party" = "active",
+  scope: "self" | "party" = "self",
 ): Buff {
   return makeBuff(
     effectId,
@@ -162,7 +162,7 @@ function resourceGatedDamage(
   value: number,
   resourceId: string,
   damageTypes: BuffCondition["damageTypes"],
-  scope: "active" | "party" = "active",
+  scope: "self" | "party" = "self",
 ): Buff {
   return dmg(effectId, source, value, damageTypes, {
     resources: [{ resourceId, comparator: "gte", value: 1, owner: "source" }],
@@ -318,7 +318,7 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
     case "shimenawas-reminiscence-4pc":
       return [resourceGatedDamage(effectId, source, 0.5, "artifact:shimenawa", ["normal", "charged", "plunge"])];
     case "emblem-of-severed-fate-4pc":
-      return [makeBuff(effectId, source, [], { damageTypes: ["burst"] }, "active", [{
+      return [makeBuff(effectId, source, [], { damageTypes: ["burst"] }, "self", [{
         sourceStat: "energyRecharge",
         targetStat: "dmgBonus",
         ratio: 0.25,
@@ -356,7 +356,7 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
           source,
           [],
           { damageTypes: ["normal"] },
-          "active",
+          "self",
           [{ sourceStat: "atk", targetStat: "flatDamageBonus", ratio: 0.252 }],
         ),
       ];
@@ -438,7 +438,10 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
       return [makeBuff(effectId, source, ELEMENTAL_ELEMENTS.map((element) => ({
         stat: "elementalDmgBonus" as const,
         element,
-        value: 0.4,
+        // The base 4pc bonus applies 12% to the elements involved in the
+        // reaction. The stronger 28% Nightsoul portion is not active for
+        // Escoffier, who does not have a Nightsoul state in this engine.
+        value: 0.12,
       })), {
         resources: [{ resourceId: "artifact:scroll-cinder-city", comparator: "gte", value: 1, owner: "source" }],
       }, "party")];
@@ -466,11 +469,11 @@ function compile(effectId: string, text: string): readonly Buff[] | undefined {
     case "finale-of-the-deep-galleries-4pc":
       return [
         dmg(`${effectId}-normal`, source, 0.6, ["normal"], {
-          maxEnergyFraction: 0,
+          requiresZeroEnergy: true,
           resources: [{ resourceId: "artifact:finale-normal-disabled", comparator: "lt", value: 1, owner: "source" }],
         }),
         dmg(`${effectId}-burst`, source, 0.6, ["burst"], {
-          maxEnergyFraction: 0,
+          requiresZeroEnergy: true,
           resources: [{ resourceId: "artifact:finale-burst-disabled", comparator: "lt", value: 1, owner: "source" }],
         }),
       ];

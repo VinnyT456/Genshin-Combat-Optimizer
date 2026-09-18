@@ -255,11 +255,11 @@ describe("damage-type scope survives the round trip", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. `party` vs `active` targeting -- SYNTHETIC, because real data has no
+// 3. `party` vs `self` targeting -- SYNTHETIC, because real data has no
 //    modelled party-wide row (see the header).
 // ---------------------------------------------------------------------------
 
-describe("party vs active targeting", () => {
+describe("party vs self targeting", () => {
   /**
    * INVENTED ROW. Not a real set bonus. Its wording is the game's fixed
    * team-wide phrasing ("all party members") and its number (+50% ATK) is
@@ -287,12 +287,12 @@ describe("party vs active targeting", () => {
     textZh: "攻击力提高50%。",
   };
 
-  it("classifies team-wide prose as `party` and the rest as `active`", () => {
+  it("classifies team-wide prose as `party` and the rest as `self`", () => {
     expect(buffsForSetBonus(SYNTHETIC_PARTY)[0]!.targets).toEqual({
       scope: "party",
     });
     expect(buffsForSetBonus(SYNTHETIC_ACTIVE)[0]!.targets).toEqual({
-      scope: "active",
+      scope: "self",
     });
   });
 
@@ -336,63 +336,28 @@ describe("party vs active targeting", () => {
     expect(party[testElectro.id]!).toBeGreaterThan(bare[testElectro.id]!);
   });
 
-  it("KNOWN ENGINE GAP: `active` currently reaches the teammate too", () => {
-    // THIS TEST PINS A BUG, NOT A DESIRED BEHAVIOUR. It is written as an
-    // equality so that FIXING the engine fails it loudly and brings someone
-    // back to this comment, rather than leaving a silently-wrong number.
-    //
-    // WHAT IS WRONG. `harvestTeamEquipmentBuffs()` pools every character's
-    // equipment buffs into ONE team-wide list, and `matchesTargets()` then
-    // resolves `scope: "active"` as "the character who is on-field for the hit
-    // being evaluated". For an always-on equipment buff those two steps
-    // compose badly: whoever is acting IS the on-field character, so an
-    // `active`-scoped buff matches every attacker and behaves exactly like
-    // `party`. The buff's provenance -- WHOSE equipment produced it -- is lost
-    // at the pooling step, so the wearer can no longer be identified.
-    //
-    // SCOPE OF THE BUG. It is not this adapter's: it reproduces with a
-    // hand-built `Buff` and no artifact data involved, and it applies equally
-    // to `weaponBuffs.ts`, which uses `scope: "active"` for the same reason.
-    // The weapon adapter's own targeting claim is currently unproven for the
-    // same reason. Fixing it means either carrying the owning character on the
-    // buff (`scope: "self"` plus `sourceCharacterId`, set at harvest time) or
-    // resolving equipment buffs per-character rather than pooling them --
-    // both changes to `src/simulation/engine/equipmentBuffs.ts`, which this
-    // module does not own. REPORTED to the Manager.
-    //
-    // WHY THE ADAPTER STILL CLASSIFIES. `targets.scope` is emitted correctly
-    // (asserted above, at the data layer, where it is genuinely observable).
-    // Hardcoding `active` because the engine cannot yet tell the two apart
-    // would bake the bug into the DATA, so that fixing the engine silently
-    // turned every party-wide set into a single-target one.
+  it("a wearer-only set does not reach the teammate", () => {
     const bare = teamDamageByCharacter(undefined);
-    const active = teamDamageByCharacter(SYNTHETIC_ACTIVE);
-    expect(active[testPyro.id]!).toBeGreaterThan(bare[testPyro.id]!);
-    expect(active[testElectro.id]!).toBeGreaterThan(bare[testElectro.id]!);
+    const self = teamDamageByCharacter(SYNTHETIC_ACTIVE);
+    expect(self[testPyro.id]!).toBeGreaterThan(bare[testPyro.id]!);
+    expect(self[testElectro.id]!).toBe(bare[testElectro.id]!);
   });
 
-  it("the two scopes are DATA-distinct even though damage cannot see it", () => {
-    // The claim that survives the engine gap: the round trip preserves the
-    // per-set decision. When the engine gap closes, the damage numbers above
-    // diverge with no change to this module.
+  it("the two scopes remain data-distinct and observable in damage", () => {
     const party = buffsForSetBonus(SYNTHETIC_PARTY);
-    const active = buffsForSetBonus(SYNTHETIC_ACTIVE);
+    const self = buffsForSetBonus(SYNTHETIC_ACTIVE);
     expect(party.map((b) => b.targets.scope)).toEqual(["party"]);
-    expect(active.map((b) => b.targets.scope)).toEqual(["active"]);
+    expect(self.map((b) => b.targets.scope)).toEqual(["self"]);
     // Same modifiers -- targeting is the ONLY difference, so nothing else can
     // be masking the classification.
-    expect(party[0]!.modifiers).toEqual(active[0]!.modifiers);
+    expect(party[0]!.modifiers).toEqual(self[0]!.modifiers);
   });
 
-  it("every real modelled row today is `active`", () => {
-    // Documents the real-data state. No modelled row is party-wide, because
-    // the game's team-wide bonuses are all 4-piece and all currently
-    // `unimplemented`. This is why SYNTHETIC_PARTY exists at all: a sweep over
-    // real data would confirm the classifier vacuously.
+  it("every real modelled row today is wearer-scoped", () => {
     for (const effect of generatedArtifactEffects) {
       if (effect.support !== "modelled") continue;
       for (const buff of buffsForSetBonus(effect)) {
-        expect(buff.targets.scope, effect.id).toBe("active");
+        expect(buff.targets.scope, effect.id).toBe("self");
       }
     }
   });

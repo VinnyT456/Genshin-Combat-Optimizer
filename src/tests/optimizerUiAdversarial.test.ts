@@ -56,6 +56,7 @@ function request(overrides: Partial<SearchRequest> = {}): SearchRequest {
   return {
     team: TEAM,
     enemy: NEUTRAL_ENEMY,
+    initialRotation: [{ characterId: "a", actionType: "skill" }],
     budget: "fast",
     objective: "total-damage",
     durationSeconds: 10,

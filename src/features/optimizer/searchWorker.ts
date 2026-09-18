@@ -1,10 +1,10 @@
 import { runSearch } from "./optimizerAdapter";
-import {
-  fingerprintSerializable,
-  type SearchJobFailure,
-  type SearchJobSuccess,
-  type SearchWorkerMessage,
-  type SearchWorkerRequest,
+import { fingerprintSerializable } from "./searchIdentity";
+import type {
+  SearchJobFailure,
+  SearchJobSuccess,
+  SearchWorkerMessage,
+  SearchWorkerRequest,
 } from "./searchTransport";
 
 type WorkerScope = {

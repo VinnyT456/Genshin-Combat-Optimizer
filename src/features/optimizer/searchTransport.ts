@@ -3,6 +3,13 @@ import {
   type SearchOutcome,
   type SearchRequest,
 } from "./optimizerAdapter";
+import {
+  canonicalizeSerializable,
+  fingerprintSerializable,
+  NON_FINITE_NUMBER_TAG,
+} from "./searchIdentity";
+
+export { canonicalizeSerializable, fingerprintSerializable } from "./searchIdentity";
 
 /** Capabilities keep the synchronous adapter from presenting fake worker UX. */
 export interface SearchTransportCapabilities {
@@ -86,65 +93,43 @@ export interface SearchTransportJob {
   readonly run: (onEvent?: (event: SearchTransportEvent) => void) => Promise<SearchJobResponse>;
 }
 
-/** Stable JSON for request identity and transport validation. */
-export function canonicalizeSerializable(value: unknown): string {
-  const active = new Set<object>();
-
-  function visit(input: unknown): string {
-    if (input === null) return "null";
-    switch (typeof input) {
-      case "string": return JSON.stringify(input);
-      case "boolean": return input ? "true" : "false";
-      case "number":
-        if (!Number.isFinite(input)) throw new TypeError("non-finite number is not transportable");
-        return Object.is(input, -0) ? "0" : String(input);
-      case "undefined": throw new TypeError("undefined is not transportable");
-      case "function": throw new TypeError("functions are not transportable");
-      case "symbol": throw new TypeError("symbols are not transportable");
-      case "bigint": throw new TypeError("bigints are not transportable");
-    }
-
-    if (typeof input !== "object") throw new TypeError("unsupported transport value");
-    if (active.has(input)) throw new TypeError("cyclic request is not transportable");
-    active.add(input);
-    try {
-      if (Array.isArray(input)) return `[${input.map(visit).join(",")}]`;
-      const prototype = Object.getPrototypeOf(input);
-      if (prototype !== Object.prototype && prototype !== null) {
-        throw new TypeError("class instances are not transportable");
-      }
-      const record = input as Record<string, unknown>;
-      const keys = Object.keys(record).sort();
-      return `{${keys.map((key) => `${JSON.stringify(key)}:${visit(record[key])}`).join(",")}}`;
-    } finally {
-      active.delete(input);
-    }
-  }
-
-  return visit(value);
-}
-
-/** Small deterministic digest; cryptographic integrity belongs to ReplayPack. */
-export function fingerprintSerializable(value: unknown): string {
-  const text = canonicalizeSerializable(value);
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
-}
-
 export function createSearchJobRequest(requestId: string, payload: SearchRequest): SearchJobRequest {
   if (requestId.trim().length === 0) throw new TypeError("requestId must not be empty");
-  const canonicalPayload = canonicalizeSerializable(payload);
-  const immutablePayload = JSON.parse(canonicalPayload) as SearchRequest;
+  const canonicalPayload = canonicalizeSerializable(payload, { allowNonFinite: true });
+  const immutablePayload = reviveNonFiniteNumbers(
+    JSON.parse(canonicalPayload),
+  ) as SearchRequest;
   deepFreeze(immutablePayload);
   return Object.freeze({
     requestId,
-    inputFingerprint: fingerprintSerializable(payload),
+    // Fingerprint the canonical transport form. Non-finite values are tagged
+    // here, so request identity stays deterministic without asking the strict
+    // public fingerprint helper to hash a value it intentionally rejects.
+    inputFingerprint: fingerprintSerializable(JSON.parse(canonicalPayload)),
     payload: immutablePayload,
   });
+}
+
+function reviveNonFiniteNumbers(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reviveNonFiniteNumbers);
+  if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length === 1 &&
+    record[NON_FINITE_NUMBER_TAG] === "NaN"
+  ) return Number.NaN;
+  if (
+    Object.keys(record).length === 1 &&
+    record[NON_FINITE_NUMBER_TAG] === "Infinity"
+  ) return Number.POSITIVE_INFINITY;
+  if (
+    Object.keys(record).length === 1 &&
+    record[NON_FINITE_NUMBER_TAG] === "-Infinity"
+  ) return Number.NEGATIVE_INFINITY;
+  for (const [key, child] of Object.entries(record)) {
+    record[key] = reviveNonFiniteNumbers(child);
+  }
+  return record;
 }
 
 function deepFreeze(value: object): void {

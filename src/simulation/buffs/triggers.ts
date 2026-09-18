@@ -1,6 +1,15 @@
 // ============================================================================
 
 import type { Buff } from "@/simulation/buffs/types";
+import type {
+  DamageType,
+  Element,
+} from "@/types";
+import type {
+  HealingDefinition,
+  HealthChangeDefinition,
+  StateEffect,
+} from "@/simulation/character/kit";
 // Coordinated Attacks & Trigger Declarations.
 //
 // Models reactive / triggered effects (Xingqiu rain swords on normal attack,
@@ -16,6 +25,10 @@ export type TriggerType =
   | "onChargedAttack"
   | "onSkillCast"
   | "onBurstCast"
+  /** A qualifying elemental-skill hit, after the hit resolves. */
+  | "onSkillHit"
+  /** A damage event before its hit is priced, for consume-on-hit effects. */
+  | "onDamageDealtBeforeHit"
   | "onDamageDealt"
   | "onReaction"
   /** Time-driven field proc, evaluated at each declared interval. */
@@ -36,10 +49,42 @@ export interface TriggeredEffectDefinition<TAbility = unknown> {
   snapshotMode?: "cast" | "dynamic";
   maxProcs?: number;
   sourceCharacterId: string;
+  /** Optional event-source filter for event-driven triggers. */
+  eventSourceCharacterId?: string;
+  /** Optional ability-id filter for event-driven triggers. */
+  eventAbilityIds?: readonly string[];
+  /** Optional damage-type filter for damage-event triggers. */
+  eventDamageTypes?: readonly DamageType[];
+  /** Optional elemental filter for damage-event triggers. */
+  eventElements?: readonly Element[];
+  /** Exclude damage events produced by this trigger's source character. */
+  excludeEventSourceCharacterId?: boolean;
+  /** Require the event source to be the currently active character. */
+  eventSourceMustBeActive?: boolean;
+  /** Require at least this amount of one source-owned resource before proccing. */
+  requiredResourceMinimum?: {
+    resourceId: string;
+    amount: number;
+  };
   /** Ability executed when this effect triggers (e.g. coordinated attack). */
   ability?: TAbility;
   /** Declarative buffs created after the triggered ability resolves. */
   buffs?: readonly Buff[];
+  /** Declarative resource changes created when the trigger procs. */
+  stateEffects?: readonly StateEffect[];
+  /** Declarative resource changes applied after the triggered ability resolves. */
+  stateEffectsAfterAbility?: readonly StateEffect[];
+  /** Flat energy generated for the trigger source. */
+  energyGenerated?: number;
+  /** Optional source-stat multiplier for expected energy generation. */
+  energyGeneratedBySourceStat?: {
+    stat: "critRate";
+    ratio: number;
+  };
+  /** Healing emitted when the trigger procs. */
+  healing?: readonly HealingDefinition[];
+  /** HP changes emitted before the triggered event's damage resolves. */
+  hpChangesBeforeHit?: readonly HealthChangeDefinition[];
 }
 
 /**

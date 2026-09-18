@@ -15,7 +15,9 @@ import type {
   CharacterDefinition,
   Rotation,
   RotationAction,
+  SkillInputVariant,
 } from "@/types";
+import type { GenericCharacterDefinition } from "@/simulation/character/character";
 import { DEFAULT_SWAP_COST_SECONDS } from "@/simulation/engine/constants";
 import { charNameZh } from "@/lib/i18n";
 
@@ -24,6 +26,11 @@ export type AddableActionType = Extract<
   ActionType,
   "normal" | "charged" | "skill" | "burst"
 >;
+
+/** Legacy fields plus the optional lossless kit used by the website roster. */
+export type SequenceCharacter = CharacterDefinition & {
+  readonly engineDefinition?: GenericCharacterDefinition;
+};
 
 export const ADDABLE_ACTION_TYPES: readonly AddableActionType[] = [
   "skill",
@@ -56,6 +63,27 @@ export function actionDisplayLabel(actionType: ActionType): string {
 
 export function actionBadgeGlyph(actionType: ActionType): string {
   return ACTION_LABELS[actionType]?.short ?? "?";
+}
+
+export function skillVariantLabel(variant: SkillInputVariant): string {
+  return variant === "tap" ? "点按" : "长按";
+}
+
+function skillVariantAbility(
+  character: SequenceCharacter,
+  variant: SkillInputVariant,
+) {
+  return character.engineDefinition?.skillVariants?.[variant];
+}
+
+/** Variants declared by the character's lossless engine definition. */
+export function skillInputVariantsFor(
+  character: SequenceCharacter | undefined,
+): readonly SkillInputVariant[] {
+  if (character?.engineDefinition === undefined) return [];
+  return (["tap", "hold"] as const).filter(
+    (variant) => skillVariantAbility(character, variant) !== undefined,
+  );
 }
 
 export function characterDisplayLabel(
@@ -99,14 +127,19 @@ export function formatTotalSeconds(seconds: number): string {
  */
 export function actionDuration(
   action: RotationAction,
-  character: CharacterDefinition | undefined,
+  character: SequenceCharacter | undefined,
   swapCostSeconds: number,
 ): number | null {
   if (action.actionType === "swap") return swapCostSeconds;
   if (character === undefined) return null;
   switch (action.actionType) {
-    case "skill":
-      return character.elementalSkill.castTime;
+    case "skill": {
+      const variant =
+        action.skillVariant === undefined
+          ? undefined
+          : skillVariantAbility(character, action.skillVariant);
+      return variant?.castTime ?? character.elementalSkill.castTime;
+    }
     case "burst":
       return character.elementalBurst.castTime;
     case "normal":
@@ -115,23 +148,6 @@ export function actionDuration(
       return character.chargedAttack.castTime;
     default:
       return null;
-  }
-}
-
-/** The ability id an addable action type resolves to on a given character. */
-export function abilityIdFor(
-  character: CharacterDefinition,
-  actionType: AddableActionType,
-): string {
-  switch (actionType) {
-    case "skill":
-      return character.elementalSkill.id;
-    case "burst":
-      return character.elementalBurst.id;
-    case "normal":
-      return character.normalAttack.id;
-    case "charged":
-      return character.chargedAttack.id;
   }
 }
 
@@ -367,8 +383,9 @@ export interface InsertResult {
 export function insertAction(
   rotation: Rotation,
   index: number,
-  character: CharacterDefinition,
+  character: SequenceCharacter,
   actionType: AddableActionType,
+  skillVariant?: SkillInputVariant,
 ): InsertResult {
   const autoSwapped = needsAutoSwap(rotation, index, character.id);
   const inserted: RotationAction[] = [];
@@ -379,7 +396,15 @@ export function insertAction(
   inserted.push({
     characterId: character.id,
     actionType,
-    abilityId: abilityIdFor(character, actionType),
+    // `actionType` is a slot request, not a frozen ability choice. Stateful
+    // kits can replace that slot at runtime (for example C6 Yelan's Normal
+    // slot and Skirk's Seven-Phase Flash slots), so persisting the base
+    // ability id makes a later simulation reject an otherwise valid action.
+    // The engine resolves the slot from the current state; explicit abilityId
+    // remains available for optimizer-generated/pinned actions.
+    ...(actionType === "skill" && skillVariant !== undefined
+      ? { skillVariant }
+      : {}),
   });
 
   const spliced = [...rotation];
@@ -476,11 +501,15 @@ function step(index: number): number {
 
 export function describeAction(
   action: RotationAction,
-  character: CharacterDefinition | undefined,
+  character: SequenceCharacter | undefined,
 ): string {
   const name = characterDisplayLabel(character);
   if (action.actionType === "swap") return `切至 ${name}`;
-  return `${name} ${actionDisplayLabel(action.actionType)}`;
+  const variant =
+    action.actionType === "skill" && action.skillVariant !== undefined
+      ? `（${skillVariantLabel(action.skillVariant)}）`
+      : "";
+  return `${name} ${actionDisplayLabel(action.actionType)}${variant}`;
 }
 
 export function announceInsert(
@@ -488,8 +517,13 @@ export function announceInsert(
   characterName: string,
   actionType: AddableActionType,
   swapCostSeconds: number,
+  skillVariant?: SkillInputVariant,
 ): string {
-  const actionLabel = actionDisplayLabel(actionType);
+  const actionLabel = `${actionDisplayLabel(actionType)}${
+    actionType === "skill" && skillVariant !== undefined
+      ? `（${skillVariantLabel(skillVariant)}）`
+      : ""
+  }`;
   if (result.autoSwapped) {
     return (
       `已插入 切至 ${characterName}（${formatSeconds(swapCostSeconds)} 秒）与 ` +

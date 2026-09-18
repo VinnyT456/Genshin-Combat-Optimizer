@@ -59,6 +59,8 @@ describe("Enka character-pool restriction", () => {
     expect(screen.getByLabelText(/^2 号位：/)).toHaveAccessibleName(/行秋/);
     expect(screen.getByRole("button", { name: /编辑班尼特的武器配置/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /编辑班尼特的圣遗物配置/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /班尼特.*元素战技.*点按施放/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /班尼特.*元素战技.*长按施放/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "添加角色至 3 号位" }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "选择出战角色 — 席位 3" })).toBeInTheDocument());

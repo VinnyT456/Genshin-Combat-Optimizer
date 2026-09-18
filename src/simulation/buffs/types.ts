@@ -57,6 +57,8 @@ export type StatKey =
   | "dmgBonus"
   /** Flat additive base damage (e.g. deterministic expected proc damage). */
   | "flatDamageBonus"
+  /** Additive bonus to the talent motion-value multiplier for one damage type. */
+  | "baseDmgMultiplier"
   /**
    * Per-element DMG% bonus. REQUIRES `element` to be set on the modifier;
    * a modifier with this key and no `element` is ignored (and reported).
@@ -105,6 +107,8 @@ export interface StatModifier {
    * per reaction — they genuinely are distinct keys in the game's formula.
    */
   reaction?: ReactionBonusKey;
+  /** Required when `stat === "baseDmgMultiplier"`. */
+  damageType?: DamageType;
 }
 
 /** Character-side resistance change, expressed as a fraction (0.15 == 15%).
@@ -161,6 +165,20 @@ export interface StatConversionModifier {
   maxCap?: number;
   /** Required when `targetStat === "elementalDmgBonus"`; ignored otherwise. */
   element?: Element;
+  /** Required when `targetStat === "baseDmgMultiplier"`. */
+  damageType?: DamageType;
+}
+
+/** A stat value derived from a live character-owned resource. */
+export interface ResourceStatModifier {
+  resourceId: string;
+  owner: "source" | "target";
+  targetStat: StatKey;
+  ratio: number;
+  threshold?: number;
+  maxCap?: number;
+  /** Required when `targetStat === "baseDmgMultiplier"`. */
+  damageType?: DamageType;
 }
 
 /**
@@ -322,6 +340,8 @@ export interface BuffCondition {
   maxEnergyFraction?: number;
   /** Only applies while current energy is strictly below the character's maximum. */
   requiresEnergyBelowMax?: boolean;
+  /** Only applies while the character has no ordinary Burst energy. */
+  requiresZeroEnergy?: boolean;
   /**
    * Resource gates. ALL listed conditions must hold (logical AND), matching
    * the AND semantics of every other field on `BuffCondition`.
@@ -355,6 +375,8 @@ export interface BuffCondition {
   maxHpFractionExclusive?: number;
   /** Shield-state gate for shield-dependent set bonuses. */
   requiresShield?: boolean;
+  /** Do not apply a party buff to the character that authored it. */
+  excludeSourceCharacter?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +488,8 @@ export interface Buff {
    * folded into the target stat channel.
    */
   conversions?: readonly StatConversionModifier[];
+  /** Dynamic stat changes read from the current resource snapshot. */
+  resourceModifiers?: readonly ResourceStatModifier[];
   /**
    * DMG bonus derived from the energy cost of the ability being evaluated.
    * This is distinct from a character-wide conversion: Raiden's Eye, for
@@ -650,6 +674,39 @@ export interface StanceDefinition<TNormal = unknown, TAbility = unknown> {
   skill?: TAbility;
   /** Replacement burst while this stance is active. */
   burst?: TAbility;
+  /**
+   * Resource spent by a replacement action. When the pool is empty the
+   * replacement is unavailable; `endWhenDepleted` closes the stance after
+   * the last replacement use.
+   */
+  replacementResourceCost?: {
+    resourceId: string;
+    amount: number;
+    minimum?: number;
+    endWhenDepleted?: boolean;
+  };
+  /** Multiple independent pools may gate one replacement action. */
+  replacementResourceCosts?: readonly {
+    resourceId: string;
+    amount: number;
+    minimum?: number;
+    endWhenDepleted?: boolean;
+  }[];
+  /** Resource pools consumed after a replacement action resolves. */
+  postActionResourceCosts?: readonly {
+    resourceId: string;
+    amount: number;
+    endWhenDepleted?: boolean;
+  }[];
+  /** Continuous resource drain while this stance is active. */
+  resourceDrain?: {
+    resourceId: string;
+    amountPerSecond: number;
+    intervalSeconds: number;
+    endWhenDepleted?: boolean;
+  };
+  /** Resources cleared when this stance ends, including swap cancellation. */
+  resetResourcesOnEnd?: readonly string[];
   /** Buffs applied when this stance naturally expires or is cancelled. */
   stateEndBuffs?: readonly Buff[];
 }

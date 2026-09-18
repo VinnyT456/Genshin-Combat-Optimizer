@@ -21,6 +21,7 @@
 .wordmark b { color: var(--cyan); }
 .modelState, .navLink, .kicker, .cardIndex, .metaRow, .footer { font: 11px/1.5 ui-monospace, monospace; letter-spacing: .12em; }
 .modelState { color: var(--muted); }
+.headerActions { display: flex; align-items: center; gap: 18px; }
 .nav { display: flex; gap: 24px; }
 .navLink { display: inline-flex; align-items: center; min-height: 44px; color: #aabcbf; text-decoration: none; }
 .navLink:hover { color: var(--cyan); }
@@ -67,6 +68,7 @@
   .launch { grid-template-columns: minmax(0, 1fr) minmax(340px, 1fr); gap: 28px; }
   .hero h1 { font-size: 3rem; }
   .modelState { display: none; }
+  .headerActions { gap: 10px; }
   .entryCard { padding: 18px; }
 }
 @media (max-width: 760px) {

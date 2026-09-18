@@ -163,6 +163,7 @@ const STAT_KEYS = exhaustive<StatKey>()([
   "energyRecharge",
   "dmgBonus",
   "flatDamageBonus",
+  "baseDmgMultiplier",
   "elementalDmgBonus",
   "reactionBonus",
 ] as const);
@@ -232,6 +233,13 @@ function toStatModifier(
         : asReactionBonusKey(modifier.reaction);
     if (reaction === undefined) return undefined;
     return { stat, value: modifier.value, reaction };
+  }
+
+  if (stat === "baseDmgMultiplier") {
+    const damageType =
+      modifier.damageType === undefined ? undefined : asDamageType(modifier.damageType);
+    if (damageType === undefined) return undefined;
+    return { stat, value: modifier.value, damageType };
   }
 
   return { stat, value: modifier.value };
@@ -407,7 +415,7 @@ interface ScopeGroup {
  * Who a set's bonus buffs.
  *
  * THIS IS A PER-SET DATA DECISION, NOT A DEFAULT. Most bonuses buff only the
- * wearer (`active`), but a genuinely team-wide bonus -- Noblesse Oblige's 4pc
+ * wearer (`self`), but a genuinely team-wide bonus -- Noblesse Oblige's 4pc
  * "+20% ATK for all party members" is the canonical one -- is `party`, and
  * getting it wrong turns a party-wide buff single-target or vice versa. Both
  * are plausible wrong numbers.
@@ -417,17 +425,17 @@ interface ScopeGroup {
  * below match the game's fixed wording for a team-wide grant; anything else is
  * the wearer.
  *
- * WHY `active` AND NOT `self` FOR THE WEARER: `self` requires
- * `sourceCharacterId`, and the harvest is already per-character -- the buff
- * reaches exactly the character whose equipment entry produced it. This
- * matches `weaponBuffs.ts`.
+ * The harvest attaches `sourceCharacterId` to each equipment buff after this
+ * translation step. That makes `self` the correct scope even though the buffs
+ * are later pooled into one team resolver; `active` would instead follow the
+ * character currently on field and would leak a wearer's bonus to teammates.
  *
  * STATUS TODAY: no `modelled` row matches, because every modelled row is a
  * 2-piece bonus and the game's team-wide bonuses are all 4-piece and all
  * currently `unimplemented` (their gating -- "after using an Elemental Burst"
  * -- is not statable). The classifier is present, exercised by a SYNTHETIC
  * fixture in the tests, and correct the moment such a row becomes modelled.
- * Hardcoding `active` because real data is uniformly `active` today would be
+ * Hardcoding `self` because real data is uniformly wearer-scoped today would be
  * the silent-party-drop bug waiting for the first team-wide row.
  */
 const PARTY_WIDE_PROSE = [
@@ -437,10 +445,10 @@ const PARTY_WIDE_PROSE = [
   /party members/i,
 ];
 
-function targetScopeFor(effect: GeneratedArtifactEffect): "party" | "active" {
+function targetScopeFor(effect: GeneratedArtifactEffect): "party" | "self" {
   return PARTY_WIDE_PROSE.some((pattern) => pattern.test(effect.text))
     ? "party"
-    : "active";
+    : "self";
 }
 
 /**

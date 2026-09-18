@@ -3,6 +3,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { RotationEditor } from "@/features/setup/RotationEditor";
 import { DEFAULT_EDITOR_SWAP_COST_SECONDS } from "@/features/setup/rotationEditing";
 import { nationalTeam } from "@/game-data";
+import { findCharacter } from "@/game-data/characters/registry";
+import { toWebsiteCharacter } from "@/features/team-builder/rosterModel";
 import type { Rotation } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -102,6 +104,44 @@ describe("RotationEditor — swap cost comes from config, not a constant (§15.3
     );
 
     expect(screen.getAllByText("0.40").length).toBeGreaterThan(0);
+  });
+});
+
+describe("RotationEditor — explicit tap/hold skill inputs", () => {
+  it("renders separate controls for a character with two skill inputs", () => {
+    const bennett = toWebsiteCharacter(findCharacter("bennett")!);
+    render(
+      <RotationEditor
+        rotation={[]}
+        onRotationChange={() => {}}
+        team={[bennett, null, null, null]}
+        swapCost={DEFAULT_EDITOR_SWAP_COST_SECONDS}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /点按施放/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /长按施放/ })).toBeTruthy();
+  });
+
+  it("writes the selected hold form into the rotation", () => {
+    const bennett = toWebsiteCharacter(findCharacter("bennett")!);
+    let nextRotation: Rotation = [];
+    render(
+      <RotationEditor
+        rotation={[]}
+        onRotationChange={(next) => { nextRotation = next; }}
+        team={[bennett, null, null, null]}
+        swapCost={DEFAULT_EDITOR_SWAP_COST_SECONDS}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /长按施放/ }));
+
+    expect(nextRotation[0]).toMatchObject({
+      characterId: "bennett",
+      actionType: "skill",
+      skillVariant: "hold",
+    });
   });
 });
 

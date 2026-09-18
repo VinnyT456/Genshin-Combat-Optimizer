@@ -151,6 +151,8 @@ export interface ActionSpan {
   widthPercent: number;
   /** True when the width was clamped, so the real duration needs a tooltip. */
   clamped: boolean;
+  /** True when the engine published no action duration; render as a hit mark. */
+  instant: boolean;
   element: Element;
   abilityClass: AbilityClass;
   /** Chinese presentation label; never the engine's raw ability name. */
@@ -209,6 +211,114 @@ export interface TimelineModel {
   /** Total seconds spent swapping, and the swap count. */
   swapCount: number;
   totalSwapTime: number;
+}
+
+/**
+ * Facts that help a player read the timeline before inspecting individual
+ * events. Every value is derived from the emitted trace; no cast count or
+ * "rotation quality" is inferred from the authored sequence.
+ */
+export interface TimelineSummary {
+  /** All non-info events published by the engine. */
+  traceEventCount: number;
+  /** Damage events, including coordinated and delayed hits. */
+  damageEventCount: number;
+  /** Structured runtime warnings, usually skipped or constrained actions. */
+  warningCount: number;
+  swapCount: number;
+  totalSwapTime: number;
+  swapTimeFraction: number;
+}
+
+export function buildTimelineSummary(
+  model: Pick<TimelineModel, "duration" | "swapCount" | "totalSwapTime">,
+  timeline: readonly CombatEvent[],
+  warnings: readonly SimulationWarning[],
+): TimelineSummary {
+  const traceEventCount = timeline.filter((event) => event.type !== "info").length;
+  const damageEventCount = timeline.filter((event) => event.type === "damage").length;
+
+  return {
+    traceEventCount,
+    damageEventCount,
+    warningCount: warnings.length,
+    swapCount: model.swapCount,
+    totalSwapTime: model.totalSwapTime,
+    swapTimeFraction: model.duration > 0 ? model.totalSwapTime / model.duration : 0,
+  };
+}
+
+/**
+ * A conservative presentation of runtime buffs that the engine actually
+ * published. This is intentionally a window, not per-hit attribution: a
+ * temporal overlap does not prove a hit received a buff when scope or
+ * snapshot rules are involved.
+ */
+export interface TimelineBuffWindow {
+  id: string;
+  label: string;
+  scopeLabel: string;
+  start: number;
+  end: number;
+  leftPercent: number;
+  widthPercent: number;
+}
+
+const TIMELINE_BUFF_PRESENTATION: Readonly<Record<string, { label: string; scope: string }>> = {
+  "furina-fanfare-party-damage": { label: "芙宁娜 · 气氛值增益", scope: "全队" },
+  "yelan-a4-adapt-with-ease": { label: "夜兰 · 伤害加成", scope: "当前场上角色" },
+};
+
+function runtimeBuffRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Converts the serialized runtime-buff evidence in a completed run into the
+ * two windows that have an honest, stable Chinese explanation in this panel.
+ * Unknown buffs are ignored rather than guessed at.
+ */
+export function buildRuntimeBuffWindows(
+  runtimeBuffs: readonly unknown[] | undefined,
+  duration: number,
+): TimelineBuffWindow[] {
+  if (runtimeBuffs === undefined || duration <= 0) return [];
+
+  const span = safeSpan(duration);
+  const windows: TimelineBuffWindow[] = [];
+  const seen = new Set<string>();
+
+  for (const value of runtimeBuffs) {
+    const record = runtimeBuffRecord(value);
+    const id = typeof record?.id === "string" ? record.id : undefined;
+    const presentation = id === undefined ? undefined : TIMELINE_BUFF_PRESENTATION[id];
+    const startTime = typeof record?.startTime === "number" ? record.startTime : undefined;
+    const buffDuration = typeof record?.duration === "number" ? record.duration : undefined;
+    if (id === undefined || presentation === undefined || startTime === undefined || buffDuration === undefined) continue;
+    if (!Number.isFinite(startTime) || buffDuration <= 0) continue;
+
+    const visibleStart = Math.max(0, startTime);
+    const visibleEnd = Math.min(duration, startTime + buffDuration);
+    if (visibleEnd <= visibleStart) continue;
+
+    const dedupeKey = `${id}:${visibleStart}:${visibleEnd}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    windows.push({
+      id,
+      label: presentation.label,
+      scopeLabel: presentation.scope,
+      start: visibleStart,
+      end: visibleEnd,
+      leftPercent: percent(visibleStart, span),
+      widthPercent: percent(visibleEnd - visibleStart, span),
+    });
+  }
+
+  return windows.sort((a, b) => a.start - b.start || a.label.localeCompare(b.label));
 }
 
 /** Guards against a zero/negative span producing Infinity or NaN offsets. */
@@ -363,6 +473,7 @@ export function buildTimelineModel({
       leftPercent: percent(event.timestamp, span),
       widthPercent: Math.max(rawWidth, MIN_SPAN_PERCENT),
       clamped: rawWidth < MIN_SPAN_PERCENT,
+      instant: event.duration === undefined || actionDuration <= 0,
       element: d.element,
       abilityClass,
       abilityName: abilityLabelZh(d.abilityId, d.damageType),

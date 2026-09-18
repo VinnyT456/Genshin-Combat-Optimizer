@@ -1,6 +1,11 @@
-import type { DamageType, Element, ParticleEmission } from "@/types";
+import type {
+  DamageType,
+  Element,
+  ParticleEmission,
+  SkillInputVariant,
+} from "@/types";
 import type { ElementalApplication, ScalingStat, ScalingTerm } from "@/simulation/character/scaling";
-import type { IcdBehaviour } from "@/simulation/reactions/types";
+import type { IcdBehaviour, ReactionKind } from "@/simulation/reactions/types";
 import type { TalentTable } from "@/simulation/character/talent";
 import type { Buff, StanceDefinition } from "@/simulation/buffs/types";
 import type { TriggeredEffectDefinition } from "@/simulation/buffs/triggers";
@@ -70,6 +75,10 @@ export interface DamageInstanceDefinition {
    * from the mutable runtime resource value.
    */
   resourceScaling?: readonly ResourceScalingTerm[];
+  /** HP changes caused before this hit lands (e.g. Salon Member drain). */
+  hpChangesBeforeHit?: readonly HealthChangeDefinition[];
+  /** Dynamic damage bonus selected from the party's current HP state. */
+  partyHpDamageBonus?: PartyHpDamageBonus;
 }
 
 /** A scaling term whose multiplier varies with talent level. */
@@ -84,8 +93,57 @@ export interface ResourceScalingTerm {
   resourceId: string;
   stat: ScalingStat;
   multiplierPerStack: number;
-  /** Cast snapshots persist through stance hits; hit reads the live value. */
-  snapshot?: "cast" | "hit";
+  /**
+   * `cast` persists the stance-entry snapshot; `action` reads the value just
+   * before the current action's costs/transfers; `hit` reads live state.
+   */
+  snapshot?: "cast" | "action" | "hit";
+  /** Optional lower bound excluded from the scaling pool. */
+  threshold?: number;
+  /** Optional cap applied after the threshold. */
+  maxStacks?: number;
+}
+
+export interface HealthChangeDefinition {
+  kind: "damage" | "heal";
+  target: "self" | "active" | "party";
+  /** Fraction of each target's Max HP, used when `amount` is omitted. */
+  maxHpFraction?: number;
+  /** Flat HP amount, used when present. */
+  amount?: number;
+  /** Only apply while the target is above this HP fraction. */
+  onlyIfHpFractionAbove?: number;
+}
+
+export interface PartyHpDamageBonus {
+  /** Count party members whose current HP fraction meets this threshold. */
+  minHpFraction: number;
+  /** Additive DMG bonus for count 0, 1, 2, ... */
+  bonusByCount: readonly number[];
+}
+
+export interface HealingDefinition {
+  id: string;
+  name: string;
+  target: "self" | "active" | "party";
+  scaling: readonly TalentScalingTerm[];
+  flat?: TalentTable;
+  delay?: number;
+  /** Repeats every interval for the declared duration. */
+  intervalSeconds?: number;
+  durationSeconds?: number;
+  /** Expected extra healing from a source stat, e.g. C4 crit-rate healing. */
+  bonusMultiplierFromStat?: {
+    stat: "critRate";
+    ratio: number;
+  };
+  /** Reduce a periodic healing interval from a source stat, with a cap. */
+  intervalReductionFromStat?: {
+    stat: "hp";
+    unitValue: number;
+    ratio: number;
+    maxReduction: number;
+  };
 }
 
 /** Resolves a talent-indexed term to a concrete one at a given talent level. */
@@ -116,6 +174,8 @@ export interface KitAbility {
   id: string;
   name: string;
   slot: AbilitySlot;
+  /** Talent channel governing this ability's scaling; defaults from slot. */
+  talentChannel?: "normal" | "skill" | "burst";
   /**
    * Every hit this ability produces, in deterministic order.
    *
@@ -126,12 +186,23 @@ export interface KitAbility {
    * between `instances` and the `PlannedHit`s produced from them.
    */
   instances: readonly DamageInstanceDefinition[];
+  /** Deterministic healing emitted by this cast. */
+  healing?: readonly HealingDefinition[];
   /** Seconds the ability occupies on the timeline. */
   castTime: number;
   /** Cooldown in seconds. May vary with talent level. */
   cooldown: TalentTable;
+  /** Some skills start their cooldown only after the entered stance ends. */
+  cooldownStartsAfterStance?: boolean;
   /** Burst energy cost. 0 for non-bursts. */
   energyCost: number;
+  /**
+   * Optional non-energy cost. This is separate from `energyCost` so a Burst
+   * can consume a character resource without touching ordinary energy.
+   */
+  cost?: AbilityCost;
+  /** Independent uses/charges for this ability, when the kit has them. */
+  charges?: AbilityChargeDefinition;
   /** Particles emitted on cast. Absent means none. */
   particles?: ParticleEmission;
   /** Flat energy granted directly to the caster (not ER-scaled). */
@@ -142,14 +213,52 @@ export interface KitAbility {
    * interpret their meaning.
    */
   effects?: readonly StateEffect[];
+  /** Buffs that are active before this cast's own damage resolves. */
+  preHitBuffs?: readonly Buff[];
   /** Declarative buffs created after all hits of this cast resolve. */
   buffs?: readonly Buff[];
+  /** Transfer a bounded amount from one resource into another on cast. */
+  resourceTransfers?: readonly ResourceTransferDefinition[];
   /** Alternate combat stance entered when this ability is cast. */
   stance?: StanceDefinition<NormalAttackString, KitAbility>;
   /** Weapon infusion applied when this ability is cast. */
   infusion?: InfusionDefinition;
   /** Coordinated attacks or triggered effects registered when this ability is cast. */
   triggers?: readonly TriggeredEffectDefinition<KitAbility>[];
+}
+
+/** Optional tap/hold alternatives for one character's Elemental Skill. */
+export type SkillVariantMap = Readonly<
+  Partial<Record<SkillInputVariant, KitAbility>>
+>;
+
+/** A resource consumed by an ability. */
+export interface ResourceCost {
+  resourceId: string;
+  /** Minimum value required before the cast is legal. */
+  amount: number;
+  /** `all` spends the current value after the minimum is met. */
+  consume?: "amount" | "all";
+}
+
+/** Additive ability-cost channels. Omitted channels cost nothing. */
+export interface AbilityCost {
+  energy?: number;
+  resources?: readonly ResourceCost[];
+}
+
+/** Effective ordinary-energy cost, preserving legacy definitions. */
+export function energyCostOf(ability: Pick<KitAbility, "energyCost" | "cost">): number {
+  return ability.cost?.energy ?? ability.energyCost;
+}
+
+/**
+ * Independent ability uses. The runtime restores spent charges after the
+ * ability's resolved cooldown; this definition only declares the capacity.
+ */
+export interface AbilityChargeDefinition {
+  maxCharges: number;
+  initialCharges?: number;
 }
 
 /**
@@ -242,6 +351,12 @@ export interface ResourceDefinition {
   /** Hard cap. Gains clamp here. */
   max: number;
   /**
+   * When a scenario starts with full ordinary Energy, also start this
+   * alternate burst resource at its cap. This is intentionally opt-in: most
+   * resources are stacks, stances or ammunition and must still start empty.
+   */
+  startAtMaxWithFullEnergy?: boolean;
+  /**
    * Seconds after which the resource decays to `initial`, if it expires.
    * Absent means it persists for the whole rotation.
    */
@@ -270,6 +385,32 @@ export interface ResourceDefinition {
     amount: number;
     cooldownSeconds: number;
   };
+  /** Gain this resource from any HP increase/decrease in the party. */
+  gainOnHpChange?: {
+    /** Points gained per one Max-HP fraction changed (1.0 == 100%). */
+    pointsPerHpFraction: number;
+    /** Optional live resource gate, such as a burst-duration flag. */
+    requiredResourceId?: string;
+    requiredResourceMinimum?: number;
+    /** Store overflow above this resource's cap in another resource. */
+    overflowResourceId?: string;
+  };
+  /** Gain this resource from qualifying damage by another party member. */
+  gainOnDamageDealt?: {
+    elements: readonly Element[];
+    amount: number;
+    cooldownSeconds: number;
+    excludeOwner?: boolean;
+    /** Each qualifying teammate can grant at most one stack per duration. */
+    oncePerSource?: boolean;
+  };
+  /** Gain a resource when the owner is a valid participant in a reaction. */
+  gainOnReaction?: {
+    reactions: readonly ReactionKind[];
+    amount: number;
+    cooldownSeconds: number;
+    excludeOwner?: boolean;
+  };
   /**
    * When true, a burst cast by the owning character consumes the current
    * value after its hits have captured any `snapshot: "cast"` scaling terms.
@@ -294,4 +435,12 @@ export interface StateEffect {
   resourceId: string;
   kind: StateEffectKind;
   amount: number;
+}
+
+export interface ResourceTransferDefinition {
+  sourceResourceId: string;
+  targetResourceId: string;
+  amountPerSourceUnit: number;
+  maxSourceUnits?: number;
+  consumeSource?: boolean;
 }

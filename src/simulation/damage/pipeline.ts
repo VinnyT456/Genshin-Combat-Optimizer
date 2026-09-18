@@ -145,13 +145,14 @@ function totalDmgBonus(
   element: Element,
   damageType?: DamageType,
   dmgReduction = 0,
+  additionalDmgBonus = 0,
 ): number {
   const elemental = stats.elementalDmgBonus[element] ?? 0;
   const typeBonus =
     damageType && stats.typeDmgBonus
       ? (stats.typeDmgBonus[damageType] ?? 0)
       : 0;
-  return Math.max(0, 1 + stats.dmgBonus + elemental + typeBonus - dmgReduction);
+  return Math.max(0, 1 + stats.dmgBonus + additionalDmgBonus + elemental + typeBonus - dmgReduction);
 }
 
 export interface DamageInput {
@@ -197,6 +198,8 @@ export interface DamageInput {
    * populates; an explicit value here overrides that for one instance.
    */
   flatDamageBonus?: number;
+  /** Per-instance dynamic DMG bonus from a declarative kit condition. */
+  additionalDmgBonus?: number;
   /**
    * Per-instance `BaseDMGMultiplier` override.
    *
@@ -324,7 +327,7 @@ export function computeDamage(input: DamageInput): DamageInstance {
 
   const bonusMult = healingSource?.bypassMitigation
     ? 1
-    : totalDmgBonus(stats, element, damageType, shred.dmgReduction);
+    : totalDmgBonus(stats, element, damageType, shred.dmgReduction, input.additionalDmgBonus);
   const def = healingSource?.bypassMitigation
     ? 1
     : defMultiplier(

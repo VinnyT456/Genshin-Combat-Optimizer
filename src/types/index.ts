@@ -17,6 +17,9 @@ export type Element =
   | "dendro"
   | "physical";
 
+/** Input form for an Elemental Skill whose tap and hold casts differ. */
+export type SkillInputVariant = "tap" | "hold";
+
 /** Playable weapon categories used by conditional artifact effects. */
 export type WeaponType =
   | "sword"
@@ -702,6 +705,16 @@ export interface EnergyState {
   totalSpent: number;
 }
 
+/** Runtime usage state for an ability with independent charges. */
+export interface AbilityChargeSnapshot {
+  /** Charges currently available at the last state transition. */
+  current: number;
+  /** Maximum charges for this ability. */
+  max: number;
+  /** Absolute timestamps at which spent charges return. */
+  rechargeAt: readonly number[];
+}
+
 /** Declarative adjustment applied to a single energy gain before clamping. */
 export interface EnergyGainModifier {
   /** Multiplicative factor; omitted means 1. */
@@ -752,6 +765,8 @@ export interface CharacterState {
   shielded?: boolean;
   /** Map of abilityId -> timestamp at which it becomes available again. */
   cooldowns: Record<string, number>;
+  /** Independent ability charges, keyed by ability id. */
+  abilityCharges?: Record<string, AbilityChargeSnapshot>;
   /**
    * Next position in the normal-attack string (0 == N1). Advances on every
    * normal attack and wraps at the string length when the string loops.
@@ -795,6 +810,8 @@ export interface CharacterSnapshot {
   currentHp?: number;
   shielded?: boolean;
   cooldowns: CooldownState;
+  /** Independent ability charges carried across optimizer/resume snapshots. */
+  abilityCharges?: Readonly<Record<string, AbilityChargeSnapshot>>;
   /**
    * Next position in the normal-attack string (0 == N1).
    *
@@ -1008,6 +1025,11 @@ export interface RotationAction {
    * were not merely rejected, they were UNGENERATABLE.
    */
   normalIndex?: number;
+  /**
+   * Input form for an Elemental Skill. Absent means the character's default
+   * Skill definition; present values require an explicitly declared variant.
+   */
+  skillVariant?: SkillInputVariant;
 }
 
 /** A rotation is an ordered list of actions. Fully JSON-serializable. */
@@ -1043,6 +1065,8 @@ export interface HealingEvent {
   timestamp: number;
   sourceCharacterId: string;
   targetCharacterId?: string;
+  /** Target resolution for character-authored healing. */
+  targetScope?: "source" | "active" | "party";
   /** HP restored, including overflow when the source effect records it. */
   amount: number;
 }
@@ -1094,6 +1118,10 @@ export type ArtifactStateEffect =
       value: number;
       /** Optional action-slot gate for hit-triggered resources. */
       actionTypes?: readonly ActionType[];
+      /** For resourceEvent triggers, constrain the changed HP target. */
+      eventTarget?: "self" | "otherPartyMember";
+      /** For resourceEvent triggers, require the event initiator to be the owner. */
+      eventSource?: "owner";
       /** Optional damage-type gate for hit-triggered resources. */
       damageTypes?: readonly DamageType[];
       /** Optional element gate for hit-triggered resources. */
@@ -1337,6 +1365,7 @@ export type ValidationErrorCode =
   | "unknown-ability"
   | "on-cooldown"
   | "insufficient-energy"
+  | "insufficient-resource"
   | "redundant-swap"
   | "past-time-limit"
   /**
@@ -1528,6 +1557,8 @@ export const NO_TALENT_LEVEL_BOOSTS: TalentLevelBoostMap = {};
 export interface SimulationConfig {
   /** Whether to compute crit as an expected value (default) or forced. */
   critMode?: "expected" | "always" | "never";
+  /** Start with ordinary Energy full and opt-in alternate burst resources capped. */
+  startWithFullEnergy?: boolean;
   /**
    * Seconds of on-field time a character swap costs.
    * Defaults to {@link DEFAULT_SWAP_COST_SECONDS}.

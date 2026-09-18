@@ -205,6 +205,37 @@ describe("getActiveBuffs — conditions", () => {
     ).toHaveLength(0);
   });
 
+  it("treats a zero-max-energy character as having zero ordinary energy", () => {
+    const zeroEnergy: SimulationSnapshot = {
+      time: 0,
+      characters: {
+        [testPyro.id]: {
+          characterId: testPyro.id,
+          energy: { current: 0, max: 0, totalGained: 0, totalSpent: 0 },
+          cooldowns: {},
+        },
+      },
+    };
+    const nonZeroEnergy: SimulationSnapshot = {
+      ...zeroEnergy,
+      characters: {
+        [testPyro.id]: {
+          ...zeroEnergy.characters[testPyro.id]!,
+          energy: { current: 1, max: 0, totalGained: 1, totalSpent: 0 },
+        },
+      },
+    };
+    const gated = (snapshot: SimulationSnapshot) =>
+      getActiveBuffs(
+        0,
+        state([buff({ conditions: { requiresZeroEnergy: true } })], snapshot),
+        query(testPyro),
+      );
+
+    expect(gated(zeroEnergy)).toHaveLength(1);
+    expect(gated(nonZeroEnergy)).toHaveLength(0);
+  });
+
   it("supports strict enemy and character HP thresholds", () => {
     const snapshot: SimulationSnapshot = {
       time: 0,

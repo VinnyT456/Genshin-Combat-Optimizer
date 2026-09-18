@@ -815,7 +815,7 @@ describe("Character data — DEFECT PINS (passive-derived scaling is missing)", 
     ).toEqual([]);
   });
 
-  it("DEFECT: no character carries an infusion, trigger, stance, or resource", () => {
+  it("keeps only explicitly sourced resources in the roster", () => {
     // The fabricated roster hand-authored these (Diluc burst pyro infusion,
     // Xingqiu Raincutter coordinated procs, Hu Tao Paramita stance). None
     // survive the cutover: they are kit BEHAVIOUR, and neither source publishes
@@ -830,9 +830,6 @@ describe("Character data — DEFECT PINS (passive-derived scaling is missing)", 
       }
       if ((character.resources?.length ?? 0) > 0) offenders.push(`${character.id}:resource`);
     }
-    expect(
-      offenders,
-      "kit behaviour has started landing — replace these pins with positive assertions",
-    ).toEqual([]);
+    expect(offenders).toEqual(["mavuika:resource", "skirk:resource"]);
   });
 });

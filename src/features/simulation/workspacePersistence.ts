@@ -129,7 +129,9 @@ function validDraft(value: unknown): value is WorkspaceDraftSnapshot {
   if (!nonEmptyId(enemy.id) || typeof enemy.name !== "string" || typeof enemy.level !== "number" || !Number.isFinite(enemy.level) || enemy.level < 1 || !isRecord(enemy.resistances)) return false;
   if (value.team.some((character) => character !== null && (!isRecord(character) || !nonEmptyId(character.id)))) return false;
   return value.rotation.every((action) => isRecord(action) && nonEmptyId(action.characterId) && nonEmptyId(action.actionType) &&
-    (action.abilityId === undefined || nonEmptyId(action.abilityId)) && (action.normalIndex === undefined || (typeof action.normalIndex === "number" && Number.isInteger(action.normalIndex) && action.normalIndex >= 0)));
+    (action.abilityId === undefined || nonEmptyId(action.abilityId)) &&
+    (action.normalIndex === undefined || (typeof action.normalIndex === "number" && Number.isInteger(action.normalIndex) && action.normalIndex >= 0)) &&
+    (action.skillVariant === undefined || action.skillVariant === "tap" || action.skillVariant === "hold"));
 }
 function clone<T>(value: T): T { return JSON.parse(canonicalizeSerializable(value)) as T; }
 

@@ -9,14 +9,24 @@ function damageFor(
   character: ReturnType<typeof createMavuikaDefinition>,
   actionType: "skill" | "burst",
 ): number {
+  // Fighting Spirit is an explicit prerequisite of the Burst. Seed the
+  // scenario so this test measures the sourced damage channel rather than
+  // intentionally testing the resource-validation failure path.
+  const readyCharacter = {
+    ...character,
+    resources: character.resources.map((resource) => ({
+      ...resource,
+      initial: resource.max,
+    })),
+  };
   const result = simulateRotation(
-    [character],
-    [{ characterId: character.id, actionType }],
+    [readyCharacter],
+    [{ characterId: readyCharacter.id, actionType }],
     testEnemy,
     noCrit,
   );
   const event = result.timeline.find(
-    (entry) => entry.type === "damage" && entry.characterId === character.id &&
+    (entry) => entry.type === "damage" && entry.characterId === readyCharacter.id &&
       entry.damage?.damageType === actionType,
   );
   if (event?.type !== "damage" || event.damage === undefined) {
@@ -29,14 +39,21 @@ function damageEventCount(
   character: ReturnType<typeof createMavuikaDefinition>,
   actionType: "skill" | "burst",
 ): number {
+  const readyCharacter = {
+    ...character,
+    resources: character.resources.map((resource) => ({
+      ...resource,
+      initial: resource.max,
+    })),
+  };
   const result = simulateRotation(
-    [character],
-    [{ characterId: character.id, actionType }],
+    [readyCharacter],
+    [{ characterId: readyCharacter.id, actionType }],
     testEnemy,
     noCrit,
   );
   return result.timeline.filter(
-    (entry) => entry.type === "damage" && entry.characterId === character.id &&
+    (entry) => entry.type === "damage" && entry.characterId === readyCharacter.id &&
       entry.damage?.damageType === actionType,
   ).length;
 }

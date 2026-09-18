@@ -1,9 +1,83 @@
 import { describe, expect, it } from "vitest";
+import { testEnemy } from "@/game-data";
+import { attachEngineDefinition } from "@/features/team-builder/rosterModel";
+import { runSimulation } from "@/features/simulation/simulationAdapter";
 import { isValidEnkaUid } from "./contracts";
 import { normalizeEnkaPayload } from "./normalize";
 import { mapEnkaPayload } from "./mapper";
+import { charNameZh } from "@/lib/i18n";
+
+function importedAvatar(avatarId: number, constellation: number) {
+  return {
+    avatarId,
+    propMap: { "4001": { val: "90" } },
+    skillLevelMap: { "1": 10, "2": 10, "3": 10 },
+    talentIdList: Array.from({ length: constellation }, (_, index) => index + 1),
+    equipList: [],
+  };
+}
 
 describe("Enka import", () => {
+  it("uses the current official Chinese name for Escoffier", () => {
+    expect(charNameZh("escoffier")).toBe("爱可菲");
+    expect(charNameZh("Escoffier")).toBe("爱可菲");
+  });
+
+  it("keeps imported constellations on the runtime path for the Skirk ship", () => {
+    const preview = mapEnkaPayload(normalizeEnkaPayload({
+      avatarInfoList: [
+        importedAvatar(10000114, 2),
+        importedAvatar(10000089, 2),
+        importedAvatar(10000060, 6),
+        importedAvatar(10000112, 0),
+      ],
+    }), "123456789", "2026-01-01T00:00:00.000Z");
+    const importedTeam = preview.characters
+      .map((entry) => entry.character)
+      .filter((character): character is NonNullable<typeof character> => character !== undefined)
+      .map(attachEngineDefinition);
+
+    expect(importedTeam.map((character) => [character.id, character.constellation])).toEqual([
+      ["skirk", 2],
+      ["furina", 2],
+      ["yelan", 6],
+      ["escoffier", 0],
+    ]);
+
+    const result = runSimulation({
+      team: importedTeam,
+      rotation: [
+        { characterId: "skirk", actionType: "skill", skillVariant: "hold" },
+        { characterId: "furina", actionType: "swap" },
+        { characterId: "furina", actionType: "skill" },
+        { characterId: "furina", actionType: "burst" },
+        { characterId: "escoffier", actionType: "swap" },
+        { characterId: "escoffier", actionType: "skill" },
+        { characterId: "escoffier", actionType: "burst" },
+        { characterId: "yelan", actionType: "swap" },
+        { characterId: "yelan", actionType: "skill" },
+        { characterId: "yelan", actionType: "skill" },
+        { characterId: "yelan", actionType: "burst" },
+        { characterId: "yelan", actionType: "normal" },
+        { characterId: "skirk", actionType: "swap" },
+        { characterId: "skirk", actionType: "burst" },
+      ],
+      enemy: testEnemy,
+      config: { critMode: "never" },
+    }).result;
+
+    expect(result.errors).toEqual([]);
+    expect(result.structuredWarnings).toEqual([]);
+    expect(result.totalDamage).toBeGreaterThan(0);
+    expect(new Set(result.timeline
+      .filter((event) => event.type === "damage")
+      .map((event) => event.characterId))).toEqual(
+      new Set(["skirk", "furina", "yelan", "escoffier"]),
+    );
+    expect(result.timeline.some((event) => event.type === "damage" && event.damage?.abilityId === "yelan-c2-water-arrow")).toBe(true);
+    expect(result.timeline.some((event) => event.type === "damage" && event.damage?.abilityId === "yelan-c6-breakthrough-barb")).toBe(true);
+  });
+
   it("accepts nine- or ten-digit UIDs without leading zeroes", () => {
     expect(isValidEnkaUid("123456789")).toBe(true);
     expect(isValidEnkaUid("012345678")).toBe(false);

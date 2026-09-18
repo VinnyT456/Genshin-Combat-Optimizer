@@ -41,7 +41,7 @@ import type { Element } from "@/types";
 // THE THREE RULES THIS MODULE ENFORCES
 // ---------------------------------------------------------------------------
 //
-// 1. ONLY `expressible` BECOMES A BUFF.
+// 1. `expressible`, plus explicit verified adapters, BECOMES A BUFF.
 //    A row bucketed `unimplemented` carries real, sourced numbers whose GATING
 //    the vocabulary cannot state ("for 10s after using an Elemental Skill",
 //    "when HP is below 70%"). Emitting one as a permanent buff would apply a
@@ -81,7 +81,7 @@ import type { Element } from "@/types";
 /** The bucket whose rows map onto the buff vocabulary with nothing invented. */
 const EXPRESSIBLE_BUCKET = "expressible";
 
-/** Weapon passives are permanently on once equipped; conditionality is scope. */
+/** Always-on portions last for the whole simulation; lifecycles use state effects. */
 const PERMANENT_DURATION = Number.POSITIVE_INFINITY;
 
 /** Simulation time at which an always-on equipment buff becomes active. */
@@ -139,6 +139,45 @@ const HOMA_LOW_HP_ATK_RATIO_BY_REFINEMENT: Readonly<
   4: 0.016,
   5: 0.018,
 };
+
+/** Azurelight's zero-energy CRIT DMG grant, by refinement. */
+const AZURELIGHT_CRIT_DMG_BY_REFINEMENT: Readonly<Record<WeaponRefinement, number>> = {
+  1: 0.4,
+  2: 0.5,
+  3: 0.6,
+  4: 0.7,
+  5: 0.8,
+};
+
+/** Splendor of Tranquil Waters' HP-triggered grants, by refinement. */
+const SPLENDOR_SKILL_DMG_BY_REFINEMENT: Readonly<Record<WeaponRefinement, number>> = {
+  1: 0.08,
+  2: 0.1,
+  3: 0.12,
+  4: 0.14,
+  5: 0.16,
+};
+const SPLENDOR_HP_BY_REFINEMENT: Readonly<Record<WeaponRefinement, number>> = {
+  1: 0.14,
+  2: 0.175,
+  3: 0.21,
+  4: 0.245,
+  5: 0.28,
+};
+
+/** Symphonist's healing-triggered ATK grants, by refinement. */
+const SYMPHONIST_SWEET_ECHOES_BY_REFINEMENT: Readonly<Record<WeaponRefinement, number>> = {
+  1: 0.32,
+  2: 0.4,
+  3: 0.48,
+  4: 0.56,
+  5: 0.64,
+};
+
+const AZURELIGHT_SKILL_WINDOW = "weapon:azurelight-skill-window";
+const SPLENDOR_SKILL_STACKS = "weapon:splendor-skill-stacks";
+const SPLENDOR_HP_STACKS = "weapon:splendor-hp-stacks";
+const SYMPHONIST_SWEET_ECHOES = "weapon:symphonist-sweet-echoes";
 
 /**
  * A refinement row's grants, grouped by the damage-type scope they share.
@@ -360,10 +399,210 @@ function mistsplitterBuffsForRefinement(
   ];
 }
 
-/** Event-driven Mistsplitter stack acquisition rules. */
-function mistsplitterStateEffectsForRefinement(
+/** Azurelight's post-skill window and zero-energy bonus. */
+function azurelightBuffsForRefinement(
+  weaponId: string,
+  passiveName: string,
+  row: GeneratedWeaponRefinement,
+): readonly Buff[] {
+  if (weaponId !== "azurelight") return [];
+  const attack = row.modifiers.find((modifier) => modifier.stat === "atkPercent")?.value;
+  const critDmg = AZURELIGHT_CRIT_DMG_BY_REFINEMENT[row.refinement];
+  if (attack === undefined || !Number.isFinite(attack) || critDmg === undefined) return [];
+  const window = {
+    resources: [{ resourceId: AZURELIGHT_SKILL_WINDOW, comparator: "gte" as const, value: 1 }],
+  };
+  return [
+    {
+      id: `${weaponId}-r${row.refinement}-skill-window`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      conditions: window,
+      modifiers: [{ stat: "atkPercent", value: attack }],
+    },
+    {
+      id: `${weaponId}-r${row.refinement}-zero-energy`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      conditions: { ...window, requiresZeroEnergy: true },
+      modifiers: [
+        { stat: "atkPercent", value: attack },
+        { stat: "critDmg", value: critDmg },
+      ],
+    },
+  ];
+}
+
+/** Static enemy-present damage/HP portion of Aqua Simulacra. */
+function aquaSimulacraBuffsForRefinement(
+  weaponId: string,
+  passiveName: string,
+  row: GeneratedWeaponRefinement,
+): readonly Buff[] {
+  if (weaponId !== "aquasimulacra") return [];
+  const hp = row.modifiers.find((modifier) => modifier.stat === "hpPercent")?.value;
+  const damage = [0.2, 0.25, 0.3, 0.35, 0.4][row.refinement - 1];
+  if (hp === undefined || damage === undefined) return [];
+  return [{
+    id: `${weaponId}-r${row.refinement}`,
+    source: passiveName,
+    startTime: EQUIPMENT_BUFF_START_TIME,
+    duration: PERMANENT_DURATION,
+    stacking: { mode: "refresh" },
+    targets: { scope: "self" },
+    modifiers: [
+      { stat: "hpPercent", value: hp },
+      { stat: "dmgBonus", value: damage },
+    ],
+  }];
+}
+
+/** Splendor's two independent HP-change windows. */
+function splendorBuffsForRefinement(
+  weaponId: string,
+  passiveName: string,
+  row: GeneratedWeaponRefinement,
+): readonly Buff[] {
+  if (weaponId !== "splendoroftranquilwaters") return [];
+  const skillDamage = SPLENDOR_SKILL_DMG_BY_REFINEMENT[row.refinement];
+  const hp = SPLENDOR_HP_BY_REFINEMENT[row.refinement];
+  if (skillDamage === undefined || hp === undefined) return [];
+  const resource = (resourceId: string) => ({
+    resources: [{ resourceId, comparator: "gte" as const, value: 1 }],
+  });
+  return [
+    {
+      id: `${weaponId}-r${row.refinement}-skill-damage`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      conditions: { ...resource(SPLENDOR_SKILL_STACKS), damageTypes: ["skill"] },
+      modifiers: [{ stat: "dmgBonus", value: skillDamage }],
+    },
+    {
+      id: `${weaponId}-r${row.refinement}-hp`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      conditions: resource(SPLENDOR_HP_STACKS),
+      modifiers: [{ stat: "hpPercent", value: hp }],
+    },
+  ];
+}
+
+/** Symphonist's permanent ATK, off-field ATK and healing window. */
+function symphonistBuffsForRefinement(
+  weaponId: string,
+  passiveName: string,
+  row: GeneratedWeaponRefinement,
+): readonly Buff[] {
+  if (weaponId !== "symphonistofscents") return [];
+  const attack = row.modifiers.find((modifier) => modifier.stat === "atkPercent")?.value;
+  const sweetEchoes = SYMPHONIST_SWEET_ECHOES_BY_REFINEMENT[row.refinement];
+  if (attack === undefined || sweetEchoes === undefined) return [];
+  return [
+    {
+      id: `${weaponId}-r${row.refinement}-attack`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      modifiers: [{ stat: "atkPercent", value: attack }],
+    },
+    {
+      id: `${weaponId}-r${row.refinement}-off-field`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "self" },
+      conditions: { requiresOnField: false },
+      modifiers: [{ stat: "atkPercent", value: attack }],
+    },
+    {
+      id: `${weaponId}-r${row.refinement}-sweet-echoes`,
+      source: passiveName,
+      startTime: EQUIPMENT_BUFF_START_TIME,
+      duration: PERMANENT_DURATION,
+      stacking: { mode: "refresh" },
+      targets: { scope: "party" },
+      conditions: {
+        resources: [{ resourceId: SYMPHONIST_SWEET_ECHOES, comparator: "gte", value: 1, owner: "source" }],
+      },
+      modifiers: [{ stat: "atkPercent", value: sweetEchoes }],
+    },
+  ];
+}
+
+/** Event-driven state acquisition rules for supported signature weapons. */
+function weaponStateEffectsForRefinement(
   weaponId: string,
 ): readonly WeaponStateEffectTemplate[] {
+  if (weaponId === "azurelight") {
+    return [{
+      kind: "resourceOnTrigger",
+      resourceId: AZURELIGHT_SKILL_WINDOW,
+      trigger: "skillCast",
+      value: 1,
+      durationSeconds: 12,
+      cooldownSeconds: 0,
+      maxStacks: 1,
+      stackMode: "refresh",
+    }];
+  }
+  if (weaponId === "splendoroftranquilwaters") {
+    return [
+      {
+        kind: "resourceOnTrigger",
+        resourceId: SPLENDOR_SKILL_STACKS,
+        trigger: "resourceEvent",
+        eventResourceId: "hpChange",
+        eventTarget: "self",
+        value: 1,
+        durationSeconds: 6,
+        cooldownSeconds: 0.2,
+        maxStacks: 3,
+        stackMode: "add",
+      },
+      {
+        kind: "resourceOnTrigger",
+        resourceId: SPLENDOR_HP_STACKS,
+        trigger: "resourceEvent",
+        eventResourceId: "hpChange",
+        eventTarget: "otherPartyMember",
+        value: 1,
+        durationSeconds: 6,
+        cooldownSeconds: 0.2,
+        maxStacks: 2,
+        stackMode: "add",
+      },
+    ];
+  }
+  if (weaponId === "symphonistofscents") {
+    return [{
+      kind: "resourceOnTrigger",
+      resourceId: SYMPHONIST_SWEET_ECHOES,
+      trigger: "resourceEvent",
+      eventResourceId: "hpChange",
+      eventSource: "owner",
+      value: 1,
+      durationSeconds: 3,
+      cooldownSeconds: 0,
+      maxStacks: 1,
+      stackMode: "refresh",
+    }];
+  }
   if (weaponId !== "mistsplitterreforged") return [];
   return [
     {
@@ -394,7 +633,8 @@ function mistsplitterStateEffectsForRefinement(
 /**
  * The buffs one refinement row grants, one per distinct damage-type scope.
  *
- * A row outside the `expressible` bucket yields `[]` -- see rule 1 above.
+ * A row outside the `expressible` bucket yields `[]` unless a named weapon
+ * adapter above translates its conditional lifecycle exactly.
  *
  * ENEMY MODIFIERS carry no scope in the generated shape (shred is a property of
  * the enemy, not of a hit), so they join the unscoped group. They ride along as
@@ -415,6 +655,14 @@ export function buffsForRefinement(
     row,
   );
   if (mistsplitter.length > 0) return mistsplitter;
+  const azurelight = azurelightBuffsForRefinement(weaponId, passiveName, row);
+  if (azurelight.length > 0) return azurelight;
+  const aquaSimulacra = aquaSimulacraBuffsForRefinement(weaponId, passiveName, row);
+  if (aquaSimulacra.length > 0) return aquaSimulacra;
+  const splendor = splendorBuffsForRefinement(weaponId, passiveName, row);
+  if (splendor.length > 0) return splendor;
+  const symphonist = symphonistBuffsForRefinement(weaponId, passiveName, row);
+  if (symphonist.length > 0) return symphonist;
   if (row.bucket !== EXPRESSIBLE_BUCKET) return [];
 
   // Insertion-ordered: modifiers, then conversions, then enemy modifiers, each
@@ -476,7 +724,7 @@ export function buffsForRefinement(
  * A generated weapon's passive as the `WeaponPassiveBuffs` the engine harvests.
  *
  * Returns `undefined` when the weapon has no passive, or when NO refinement of
- * it is expressible -- an entry whose every level is empty is indistinguishable
+ * it is translated -- an entry whose every level is empty is indistinguishable
  * from an absent one to the harvest, and returning it would suggest the passive
  * is modelled when nothing about it is.
  *
@@ -503,7 +751,7 @@ export function weaponPassiveBuffs(
     const buffs = buffsForRefinement(weapon.id, passive.name, row);
     if (buffs.length === 0) continue;
     byRefinement[row.refinement] = buffs;
-    const stateEffects = mistsplitterStateEffectsForRefinement(weapon.id);
+    const stateEffects = weaponStateEffectsForRefinement(weapon.id);
     if (stateEffects.length > 0) stateEffectsByRefinement[row.refinement] = stateEffects;
     any = true;
   }

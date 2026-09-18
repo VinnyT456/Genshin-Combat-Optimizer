@@ -18,11 +18,19 @@ const facets = Array.from({ length: SEGMENTS }, (_, index) => {
   const points = [point(angle, -1), point(next, -1), point(next, 1), point(angle, 1)];
   const light = 22 + 42 * Math.pow((Math.sin(angle + 0.8) + 1) / 2, 3);
   return {
+    index,
     points: points.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" "),
-    depth: points.reduce((sum, p) => sum + p.z, 0) / points.length,
-    color: `hsl(185 48% ${light}%)`,
+    // SSR and browser JS engines can differ by a few ulps for trig results.
+    // Bucket the decorative depth before sorting so near-ties cannot reorder
+    // SVG siblings during hydration. The artwork does not need sub-pixel
+    // depth precision, but hydration does need an identical child order.
+    depthBucket: Math.round(
+      (points.reduce((sum, p) => sum + p.z, 0) / points.length) * 8,
+    ),
+    // Quantize the cosmetic color for the same cross-runtime determinism.
+    color: `hsl(185 48% ${Math.round(light)}%)`,
   };
-}).sort((a, b) => a.depth - b.depth);
+}).sort((a, b) => a.depthBucket - b.depthBucket || a.index - b.index);
 
 const contours = [-1, -0.9, -0.55, 0, 0.55, 0.9, 1].map((edge) =>
   Array.from({ length: SEGMENTS + 1 }, (_, index) => {

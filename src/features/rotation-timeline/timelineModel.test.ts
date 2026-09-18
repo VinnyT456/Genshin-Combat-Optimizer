@@ -5,6 +5,8 @@ import {
   MIN_SPAN_PERCENT,
   buildTicks,
   buildTimelineModel,
+  buildTimelineSummary,
+  buildRuntimeBuffWindows,
   chooseTickStep,
   laneIndexOfEvent,
   nearestInLane,
@@ -196,6 +198,99 @@ describe("buildTimelineModel — lanes", () => {
   });
 });
 
+describe("buildTimelineSummary", () => {
+  it("summarizes emitted trace facts without counting info events", () => {
+    const timeline: CombatEvent[] = [
+      damageEvent(0, "a", testPyro.elementalSkill.id),
+      swapEvent(1, "b", "a", 0.6),
+      { timestamp: 2, type: "energy", characterId: "b", description: "gain" },
+      { timestamp: 3, type: "info", characterId: "b", description: "note" },
+    ];
+    const model = buildTimelineModel({
+      timeline,
+      duration: 5,
+      team: [a, b, null, null],
+      warnings: NO_WARNINGS,
+    });
+
+    expect(buildTimelineSummary(model, timeline, NO_WARNINGS)).toEqual({
+      traceEventCount: 3,
+      damageEventCount: 1,
+      warningCount: 0,
+      swapCount: 1,
+      totalSwapTime: 0.6,
+      swapTimeFraction: 0.12,
+    });
+  });
+
+  it("uses the observed rotation duration for the swap share", () => {
+    const timeline = [swapEvent(0, "a", undefined, 0.8)];
+    const model = buildTimelineModel({
+      timeline,
+      duration: 10,
+      team: [a, null, null, null],
+      warnings: NO_WARNINGS,
+    });
+
+    expect(buildTimelineSummary(model, timeline, [{
+      code: "insufficient-energy",
+      actionIndex: 0,
+      characterId: "a",
+      timestamp: 0,
+      message: "not ready",
+    }])).toMatchObject({
+      warningCount: 1,
+      swapTimeFraction: 0.08,
+    });
+  });
+});
+
+describe("buildRuntimeBuffWindows", () => {
+  it("keeps only known, published windows and clips them to the run", () => {
+    const windows = buildRuntimeBuffWindows([
+      {
+        id: "furina-fanfare-party-damage",
+        startTime: 1,
+        duration: 18,
+        targets: { scope: "party" },
+      },
+      {
+        id: "yelan-a4-adapt-with-ease",
+        startTime: 2,
+        duration: 15,
+        targets: { scope: "active" },
+      },
+      {
+        id: "unexplained-buff",
+        startTime: 0,
+        duration: 10,
+      },
+      {
+        id: "furina-fanfare-party-damage",
+        startTime: 1,
+        duration: 18,
+      },
+    ], 10);
+
+    expect(windows).toEqual([
+      expect.objectContaining({
+        id: "furina-fanfare-party-damage",
+        label: "芙宁娜 · 气氛值增益",
+        scopeLabel: "全队",
+        start: 1,
+        end: 10,
+      }),
+      expect.objectContaining({
+        id: "yelan-a4-adapt-with-ease",
+        label: "夜兰 · 伤害加成",
+        scopeLabel: "当前场上角色",
+        start: 2,
+        end: 10,
+      }),
+    ]);
+  });
+});
+
 describe("buildTimelineModel — span geometry", () => {
   it("derives span width from the duration the engine published on the event", () => {
     // elementalSkill castTime is 1.0 over a 10s track => 10%.
@@ -235,6 +330,18 @@ describe("buildTimelineModel — span geometry", () => {
     const span = model.lanes[0]?.actions[0];
     expect(span?.widthPercent).toBe(MIN_SPAN_PERCENT);
     expect(span?.clamped).toBe(true);
+  });
+
+  it("marks an event without published duration as an instantaneous hit", () => {
+    const event = { ...damageEvent(0, "a", testPyro.normalAttack.id) };
+    delete event.duration;
+    const model = buildTimelineModel({
+      timeline: [event],
+      duration: 10,
+      team: [a, null, null, null],
+      warnings: NO_WARNINGS,
+    });
+    expect(model.lanes[0]?.actions[0]?.instant).toBe(true);
   });
 
   it("positions spans proportionally along the track", () => {

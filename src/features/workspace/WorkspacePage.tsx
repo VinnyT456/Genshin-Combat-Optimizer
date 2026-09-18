@@ -13,6 +13,7 @@ import {
   memberCount,
   members,
   orphanedActionCount,
+  retainTeamActions,
   referenceCharacterLevel,
   resolveActiveId,
   teamFrom,
@@ -72,6 +73,8 @@ import {
 } from "@/features/optimizer/incumbentRotation";
 import { Section } from "@/components/ui/Section";
 import { Button } from "@/components/ui/Button";
+import { LanguageToggle } from "@/components/ui/LanguageToggle";
+import { useLanguage } from "@/components/ui/LanguageProvider";
 import { LiveRegion } from "@/components/ui/LiveRegion";
 import { cn } from "@/components/ui/cn";
 import {
@@ -84,6 +87,7 @@ import { elementBgClass, fmtNum } from "@/lib/format";
 import { MAIN_CONTENT_ID } from "@/components/ui/landmarks";
 import { detectResonances } from "@/features/team-builder/resonance";
 import {
+  attachEngineDefinition,
   toWebsiteCharacter,
 } from "@/features/team-builder/rosterModel";
 import { mergeRecommendedBuildEquipment } from "@/features/team-builder/recommendedBuildSelection";
@@ -120,6 +124,7 @@ const STALE_RESULT_NOTICE =
 const STALE_RESULT_ANNOUNCEMENT =
   "配置已变更，下方结果对应的是变更前的配置。";
 const SEARCH_BLOCKED_REASON = "请至少配置 1 位出战角色以搜索循环。";
+const SEARCH_EMPTY_ROTATION_REASON = "请先在动作时序流中添加至少 1 个动作再搜索。";
 
 /**
  * The team cards show a starter weapon for every character. Keep that visible
@@ -177,6 +182,8 @@ const VIEW_OPTIONS: readonly { view: AppView; label: string }[] = [
 ];
 
 export default function WorkspacePage() {
+  const { locale } = useLanguage();
+  const isEnglish = locale === "en";
   // The displayed result is stored as a RUN — a result permanently bound to the
   // inputs that produced it (`runState.ts`). Every result region below reads
   // `run.inputs`, never the live editor state, so editing the team cannot
@@ -218,6 +225,7 @@ export default function WorkspacePage() {
     DEFAULT_SEARCH_DURATION_SECONDS,
   );
   const [searchOutcome, setSearchOutcome] = useState<SearchOutcome | null>(null);
+  const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null);
   const [searchRequestSummary, setSearchRequestSummary] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [searchRequestFingerprint, setSearchRequestFingerprint] = useState<string | null>(null);
@@ -259,23 +267,27 @@ export default function WorkspacePage() {
         window.location.replace("/");
         return;
       }
-      if (context !== null) {
-        setEnkaRoster(context.availableCharacters);
-      }
+      const importedRoster = context?.availableCharacters.map(attachEngineDefinition);
+      if (importedRoster !== undefined) setEnkaRoster(importedRoster);
       const raw = window.sessionStorage.getItem(workspaceDraftKey(mode));
       const saved = raw === null ? null : parseWorkspaceDraft(raw);
-      const allowedRoster = context?.availableCharacters ?? roster;
+      const allowedRoster = importedRoster ?? roster;
       const restoredTeam = saved !== null
         ? saved.team.map((savedCharacter) => {
             if (savedCharacter === null) return null;
             const source = allowedRoster.find((candidate) => candidate.id === savedCharacter.id);
             return source === undefined ? null : { ...source, ...savedCharacter };
-          })
-        : context !== null ? teamFrom(context.characters) : initialTeamRef.current;
+        })
+        : context !== null
+          ? teamFrom(context.characters.map(attachEngineDefinition))
+          : initialTeamRef.current;
+      const restoredRotation = saved !== null
+        ? retainTeamActions(restoredTeam, saved.rotation)
+        : [];
       setTeam(restoredTeam);
       if (saved !== null) {
         setEnemy(saved.enemy);
-        setRotation(saved.rotation);
+        setRotation(restoredRotation);
         setSimConfig(saved.simConfig);
         setSearchBudget(saved.searchBudget as SearchBudget);
         setSearchObjective(saved.searchObjective as OptimizationObjective);
@@ -542,8 +554,10 @@ export default function WorkspacePage() {
   );
 
   const handleEnkaCommit = useCallback((commit: EnkaCommit) => {
-    const nextTeam: Team = [...commit.characters.slice(0, 4), null, null, null, null].slice(0, 4);
-    setEnkaRoster(commit.availableCharacters);
+    const importedCharacters = commit.characters.map(attachEngineDefinition);
+    const importedRoster = commit.availableCharacters.map(attachEngineDefinition);
+    const nextTeam: Team = [...importedCharacters.slice(0, 4), null, null, null, null].slice(0, 4);
+    setEnkaRoster(importedRoster);
     setTeam(nextTeam);
     // Enka currently exposes more weapon/artifact ids than this local catalog
     // can safely join. Preserve imported selections, then fill any gaps with
@@ -608,47 +622,72 @@ export default function WorkspacePage() {
 
   // --- Rotation search -----------------------------------------------------
 
-  const searchBlockedReason = count > 0 ? null : SEARCH_BLOCKED_REASON;
+  const searchBlockedReason = count === 0
+    ? SEARCH_BLOCKED_REASON
+    : rotation.length === 0
+      ? SEARCH_EMPTY_ROTATION_REASON
+      : null;
   const liveSearchFingerprint = useMemo(
-    () => requestFingerprint({ team: teamMembers, enemy, objective: searchObjective, duration: searchDuration, budget: searchBudget, config: simConfig }),
-    [teamMembers, enemy, searchObjective, searchDuration, searchBudget, simConfig],
+    () => requestFingerprint({
+      team: teamMembers,
+      enemy,
+      initialRotation: rotation,
+      equipment,
+      objective: searchObjective,
+      duration: searchDuration,
+      budget: searchBudget,
+      config: simConfig,
+    }),
+    [teamMembers, enemy, rotation, equipment, searchObjective, searchDuration, searchBudget, simConfig],
   );
 
   const handleSearch = useCallback(() => {
     if (searchBlockedReason !== null) return;
     const runId = ++searchRunIdRef.current;
     setSearchRequestFingerprint(liveSearchFingerprint);
+    setSearchErrorMessage(null);
     setSearchRequestSummary(
       `当前阵容与配置 · ${enemyNameZh(enemy.name)} · ${searchObjective === "dps" ? "秒伤 (DPS)" : "总伤害"} · ${searchDuration}秒 · ${searchBudget === "fast" ? "快速" : searchBudget === "thorough" ? "深入" : "均衡"}`,
     );
     setSelectedCandidateId(null);
     setSearchPhase("queued");
-    const job = createWorkerSearchJob(createSearchJobRequest(`search-${runId}`, {
-        team: teamMembers,
-        enemy,
-        budget: searchBudget,
-        objective: searchObjective,
-        durationSeconds: searchDuration,
-        config: simConfig,
-      }))
-    searchJobRef.current = job;
-    void job.run((event) => {
-      if (runId === searchRunIdRef.current && event.type === "started") setSearchPhase("searching");
-    }).then((response) => {
+    try {
+      const job = createWorkerSearchJob(createSearchJobRequest(`search-${runId}`, {
+          team: teamMembers,
+          enemy,
+          initialRotation: rotation,
+          equipment,
+          budget: searchBudget,
+          objective: searchObjective,
+          durationSeconds: searchDuration,
+          config: simConfig,
+        }));
+      searchJobRef.current = job;
+      void job.run((event) => {
+        if (runId === searchRunIdRef.current && event.type === "started") setSearchPhase("searching");
+      }).then((response) => {
+        if (runId !== searchRunIdRef.current) return;
+        searchJobRef.current = null;
+        if (response.kind === "canceled") {
+          setSearchPhase("canceled");
+          setAnnouncement("搜索已取消。当前配置和已有结果均已保留。");
+        } else if (response.kind === "failed") {
+          setSearchPhase("failed");
+          setSearchErrorMessage(response.message);
+          setAnnouncement(`搜索未完成：${response.message}`);
+        } else {
+          setSearchOutcome(response.outcome);
+          setSearchPhase(response.outcome.candidates.length > 0 ? "results" : "empty");
+          setAnnouncement(response.outcome.candidates.length > 0 ? `循环搜索完成，找到 ${response.outcome.candidates.length} 个候选循环。` : "循环搜索完成，未找到候选循环。");
+        }
+      });
+    } catch (error) {
       if (runId !== searchRunIdRef.current) return;
       searchJobRef.current = null;
-      if (response.kind === "canceled") {
-        setSearchPhase("canceled");
-        setAnnouncement("搜索已取消。当前配置和已有结果均已保留。");
-      } else if (response.kind === "failed") {
-        setSearchPhase("failed");
-        setAnnouncement("搜索未完成。");
-      } else {
-        setSearchOutcome(response.outcome);
-        setSearchPhase(response.outcome.candidates.length > 0 ? "results" : "empty");
-        setAnnouncement(response.outcome.candidates.length > 0 ? `循环搜索完成，找到 ${response.outcome.candidates.length} 个候选循环。` : "循环搜索完成，未找到候选循环。");
-      }
-    });
+      setSearchPhase("failed");
+      setSearchErrorMessage(error instanceof Error ? error.message : "未知错误");
+      setAnnouncement(error instanceof Error ? `搜索未完成：${error.message}` : "搜索未完成。");
+    }
   }, [
     searchBlockedReason,
     teamMembers,
@@ -657,6 +696,8 @@ export default function WorkspacePage() {
     searchObjective,
     searchDuration,
     simConfig,
+    rotation,
+    equipment,
     liveSearchFingerprint,
   ]);
 
@@ -749,21 +790,22 @@ export default function WorkspacePage() {
     <main id={MAIN_CONTENT_ID} className={styles.page}>
       <header className={styles.topbar}>
         <span className={styles.brand}>GENSHIN // ROTATION LAB</span>
-        <span className={styles.mode}>{mode === "uid" ? "UID 导入" : "自由实验"}</span>
+        <span className={styles.mode}>{mode === "uid" ? (isEnglish ? "UID import" : "UID 导入") : (isEnglish ? "Free experiment" : "自由实验")}</span>
         <div className="flex gap-2">
+          <LanguageToggle />
           {mode === "uid" ? (
-            <Button variant="secondary" size="sm" onClick={() => setEnkaOpen(true)}>更换 UID</Button>
+            <Button variant="secondary" size="sm" onClick={() => setEnkaOpen(true)}>{isEnglish ? "Change UID" : "更换 UID"}</Button>
           ) : (
-            <Button variant="secondary" size="sm" onClick={() => setEnkaOpen(true)}>从 UID 导入</Button>
+            <Button variant="secondary" size="sm" onClick={() => setEnkaOpen(true)}>{isEnglish ? "Import UID" : "从 UID 导入"}</Button>
           )}
           <Button variant="quiet" size="sm" onClick={() => {
-            if (!window.confirm(mode === "uid" ? "重置并退出 UID 工作区？" : "重置自由实验工作区？")) return;
+            if (!window.confirm(mode === "uid" ? (isEnglish ? "Reset and leave the UID workspace?" : "重置并退出 UID 工作区？") : (isEnglish ? "Reset the free experiment workspace?" : "重置自由实验工作区？"))) return;
             window.sessionStorage.removeItem(workspaceDraftKey(mode));
             window.sessionStorage.removeItem(equipmentStorageKey(mode));
             if (mode === "uid") window.sessionStorage.removeItem("genshin-workspace-context-v1:uid");
             if (mode === "uid") window.location.replace("/");
             else window.location.reload();
-          }}>{mode === "uid" ? "重置并退出" : "重置工作区"}</Button>
+          }}>{mode === "uid" ? (isEnglish ? "Reset & exit" : "重置并退出") : (isEnglish ? "Reset workspace" : "重置工作区")}</Button>
         </div>
       </header>
 
@@ -777,8 +819,8 @@ export default function WorkspacePage() {
           <div className={styles.hero}>
             <div>
               <p className={styles.eyebrow}>COMBAT // ROTATION OPTIMIZER</p>
-              <h1 className={styles.title}>原神战斗循环模拟器</h1>
-              <p className={styles.subtitle}>配置队伍、敌人与动作时序，再用确定性模型复盘一轮真实执行结果。</p>
+              <h1 className={styles.title}>{isEnglish ? "Genshin rotation simulator" : "原神战斗循环模拟器"}</h1>
+              <p className={styles.subtitle}>{isEnglish ? "Configure the team, enemy, and action timing, then replay one execution with the deterministic model." : "配置队伍、敌人与动作时序，再用确定性模型复盘一轮真实执行结果。"}</p>
             </div>
           </div>
 
@@ -786,7 +828,7 @@ export default function WorkspacePage() {
         <div className={styles.metrics}>
           <div className={styles.metric}>
             <p className={styles.metricLabel}>TEAM / MEMBERS</p>
-            <p className={styles.metricValue}><strong>{count}/4</strong> 角色</p>
+            <p className={styles.metricValue}><strong>{count}/4</strong> {isEnglish ? "members" : "角色"}</p>
           </div>
           <div className={styles.metric}>
             <p className={styles.metricLabel}>TARGET / LEVEL</p>
@@ -794,7 +836,7 @@ export default function WorkspacePage() {
           </div>
           <div className={styles.metric}>
             <p className={styles.metricLabel}>ROTATION / ACTIONS</p>
-            <p className={styles.metricValue}><strong>{rotation.length}</strong> 步</p>
+            <p className={styles.metricValue}><strong>{rotation.length}</strong> {isEnglish ? "actions" : "步"}</p>
           </div>
           <div className={styles.metric}>
             <p className={styles.metricLabel}>RESONANCE</p>
@@ -962,6 +1004,7 @@ export default function WorkspacePage() {
               adoptedRank={adoption.adoptedRank}
               selectedCandidateId={selectedCandidateId}
               requestSummary={searchRequestSummary}
+              errorMessage={searchErrorMessage}
               draftChanged={searchRequestFingerprint !== null && searchRequestFingerprint !== liveSearchFingerprint}
               team={teamMembers}
               onBudgetChange={setSearchBudget}
@@ -1108,20 +1151,14 @@ export default function WorkspacePage() {
             </div>
           </Section>
 
-          {/* 5. Energy Kinetics Section */}
-          <Section title="能量微粒流转" id="energy-heading">
-            <EnergyPanel
-              team={run.inputs.team}
-              timeline={run.result.timeline}
-              finalState={run.result.finalState}
-              selectedEventIndex={selectedEventIndex}
-              onSelectEvent={setSelectedEventIndex}
-            />
+          {/* 5. Damage Breakdown Section */}
+          <Section title="伤害多维拆解" id="breakdown-heading">
+            <DamageBreakdown result={run.result} team={run.inputs.team} />
           </Section>
 
           {/* 6. Timeline & Event Detail Panel */}
           <Section title="动作时序与换人节奏" id="timeline-heading">
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
               <RotationTimeline
                 timeline={run.result.timeline}
                 duration={run.result.duration}
@@ -1129,6 +1166,7 @@ export default function WorkspacePage() {
                 warnings={run.result.structuredWarnings}
                 effectiveSwapCost={run.result.effectiveSwapCost}
                 swapCostIsDefault={run.swapCostIsDefault}
+                runtimeBuffs={run.result.finalState.runtimeBuffs}
                 selectedEventIndex={selectedEventIndex}
                 onSelectEvent={setSelectedEventIndex}
               />
@@ -1140,13 +1178,21 @@ export default function WorkspacePage() {
                 }
                 charactersById={charactersById}
                 totalDamage={run.result.totalDamage}
+                runtimeBuffs={run.result.finalState.runtimeBuffs}
+                duration={run.result.duration}
               />
             </div>
           </Section>
 
-          {/* 7. Damage Breakdown Section */}
-          <Section title="伤害多维拆解" id="breakdown-heading">
-            <DamageBreakdown result={run.result} team={run.inputs.team} />
+          {/* 7. Energy Kinetics Section */}
+          <Section title="能量微粒流转" id="energy-heading">
+            <EnergyPanel
+              team={run.inputs.team}
+              timeline={run.result.timeline}
+              finalState={run.result.finalState}
+              selectedEventIndex={selectedEventIndex}
+              onSelectEvent={setSelectedEventIndex}
+            />
           </Section>
         </>
       )}

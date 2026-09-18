@@ -47,6 +47,7 @@ const STAT_LABEL_ZH: Record<StatKey, string> = {
   elementalDmgBonus: "元素伤害加成",
   reactionBonus: "反应伤害加成",
   flatDamageBonus: "额外伤害",
+  baseDmgMultiplier: "基础伤害倍率",
 };
 
 /** Stat keys whose value is a flat number rather than a fraction. */

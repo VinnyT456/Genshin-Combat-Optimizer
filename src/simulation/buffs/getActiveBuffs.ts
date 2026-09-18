@@ -211,6 +211,10 @@ export function matchesConditions(
     if (onField !== condition.requiresOnField) return false;
   }
 
+  if (condition.excludeSourceCharacter && buff?.sourceCharacterId === query.character.id) {
+    return false;
+  }
+
   if (
     condition.minEnergyFraction !== undefined ||
     condition.maxEnergyFraction !== undefined
@@ -238,6 +242,13 @@ export function matchesConditions(
       state.snapshot?.characters[query.character.id],
     );
     if (fraction === undefined || !(fraction < 1)) return false;
+  }
+
+  if (condition.requiresZeroEnergy) {
+    const snapshotChar = state.snapshot?.characters[query.character.id];
+    if (snapshotChar === undefined || snapshotChar.energy.current > RESOURCE_COMPARISON_EPSILON) {
+      return false;
+    }
   }
 
   if (condition.resources && condition.resources.length > 0) {

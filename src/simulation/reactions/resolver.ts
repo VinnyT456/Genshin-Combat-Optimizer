@@ -182,16 +182,11 @@ export function toReactionModifiers(
   const reactionKinds: string[] = [];
 
   for (const reaction of reactions) {
-    // Pure aura-state reactions remain neutral to the legacy modifier shape.
-    // Damage-bearing and reaction-triggering effects are surfaced for the
-    // engine's artifact lifecycle seam.
-    if (
-      reaction.category !== "none" ||
-      reaction.kind === "quicken" ||
-      (reaction.kind === "crystallize" && reaction.auraElement !== undefined)
-    ) {
-      reactionKinds.push(reaction.kind);
-    }
+    // Keep every reaction kind for event-driven mechanics. Frozen and
+    // Quicken are neutral in the direct-damage channels, but they are still
+    // real reactions and can trigger character resources (e.g. Skirk's Void
+    // Rifts) and reaction-based equipment effects.
+    reactionKinds.push(reaction.kind);
     const bonus = stats.reactionBonus?.[reaction.kind] ?? 0;
 
     if (reaction.kind === "crystallize" && reaction.auraElement !== undefined) {

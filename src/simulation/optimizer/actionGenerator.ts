@@ -7,6 +7,10 @@ import type {
   SimulationResult,
   SimulationSnapshot,
 } from "@/types";
+import {
+  allAbilities,
+  declaredSkillInputVariants,
+} from "@/simulation/character/character";
 import type { GenericCharacterDefinition } from "@/simulation/character/character";
 import { liftCharacter } from "@/simulation/character/adapter";
 import { createEnergyState } from "@/simulation/energy";
@@ -15,6 +19,10 @@ import {
   LEGACY_NORMAL_STRING_LENGTH,
 } from "@/simulation/engine/actionSpace";
 import { abilityForAction, validateAction } from "@/simulation/engine/validateAction";
+import {
+  cloneAbilityChargeState,
+  createAbilityChargeState,
+} from "@/simulation/cooldowns";
 
 // ============================================================================
 // Candidate Action Generation
@@ -34,6 +42,23 @@ const STANDARD_ABILITY_ACTION_TYPES: readonly ActionType[] = [
   "skill",
   "burst",
 ];
+
+function pushSkillCandidates(
+  out: RotationAction[],
+  characterId: string,
+  def: CharacterDefinition | GenericCharacterDefinition,
+): void {
+  if ("normalAttacks" in def) {
+    const variants = declaredSkillInputVariants(def);
+    if (variants.length > 0) {
+      for (const skillVariant of variants) {
+        out.push({ characterId, actionType: "skill", skillVariant });
+      }
+      return;
+    }
+  }
+  out.push({ characterId, actionType: "skill" });
+}
 
 /**
  * How many distinct normal-attack positions a character can address.
@@ -173,6 +198,10 @@ export function buildCharacterStates(
       currentEnergy: energy.current,
       energy,
       cooldowns: charSnap ? { ...charSnap.cooldowns } : {},
+      abilityCharges:
+        charSnap?.abilityCharges !== undefined
+          ? cloneAbilityChargeState(charSnap.abilityCharges)
+          : createAbilityChargeState(allAbilities(genericDef)),
       normalStringIndex:
         charSnap?.normalStringIndex ?? FIRST_NORMAL_STRING_INDEX,
       resources: charSnap?.resources ? { ...charSnap.resources } : undefined,
@@ -237,7 +266,11 @@ export function generateCandidateActions(
       }
       pushNormalCandidates(candidates, charDef.id, charDef);
       for (const actionType of STANDARD_ABILITY_ACTION_TYPES) {
-        candidates.push({ characterId: charDef.id, actionType });
+        if (actionType === "skill") {
+          pushSkillCandidates(candidates, charDef.id, charDef);
+        } else {
+          candidates.push({ characterId: charDef.id, actionType });
+        }
       }
       if ("normalAttacks" in charDef) {
         if (charDef.plungeLow) {
@@ -260,7 +293,15 @@ export function generateCandidateActions(
       pushNormalCandidates(candidates, activeCharacterId, activeDef);
     }
     for (const actionType of STANDARD_ABILITY_ACTION_TYPES) {
-      candidates.push({ characterId: activeCharacterId, actionType });
+      if (actionType === "skill") {
+        pushSkillCandidates(
+          candidates,
+          activeCharacterId,
+          activeDef ?? states.get(activeCharacterId)?.definition ?? team[0]!,
+        );
+      } else {
+        candidates.push({ characterId: activeCharacterId, actionType });
+      }
     }
 
     if (activeDef && "normalAttacks" in activeDef) {

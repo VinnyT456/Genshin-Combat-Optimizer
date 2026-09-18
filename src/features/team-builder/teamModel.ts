@@ -1,4 +1,4 @@
-import type { CharacterDefinition } from "@/types";
+import type { CharacterDefinition, Rotation } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Pure team-composition model. Slot arithmetic and party-order manipulation are
@@ -114,6 +114,21 @@ export function orphanedActionCount(
 ): number {
   const present = new Set(members(team).map((c) => c.id));
   return actionCharacterIds.filter((id) => !present.has(id)).length;
+}
+
+/**
+ * Keeps a restored action sequence executable for the team that owns it.
+ *
+ * UID imports replace the public character roster, while older saved drafts
+ * can still contain actions from the previous roster. Those actions would
+ * make the optimizer reject the entire baseline as an unknown-character run.
+ * Removing only actions whose character is absent preserves valid user work
+ * and leaves the empty sequence available for a fresh search when none can be
+ * retained.
+ */
+export function retainTeamActions(team: Team, rotation: Rotation): Rotation {
+  const present = new Set(members(team).map((character) => character.id));
+  return rotation.filter((action) => present.has(action.characterId));
 }
 
 /**

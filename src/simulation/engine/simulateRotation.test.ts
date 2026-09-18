@@ -126,6 +126,18 @@ describe("simulateRotation", () => {
     expect(r.warnings.length).toBeGreaterThan(0);
   });
 
+  it("can start a fresh combat with full energy", () => {
+    const c = makeChar();
+    const r = simulateRotation([c], [
+      { characterId: "c", actionType: "burst", abilityId: "q" },
+    ], enemy, { ...cfg, startWithFullEnergy: true });
+    expect(r.totalDamage).toBeCloseTo(2000);
+    expect(r.errors).toHaveLength(0);
+    expect(r.structuredWarnings.filter((warning) => warning.actionIndex >= 0)).toEqual([]);
+    expect(r.finalState.characters.c?.energy.current).toBe(0);
+    expect(r.finalState.characters.c?.energy.totalSpent).toBe(40);
+  });
+
   it("allows a burst after enough energy is generated", () => {
     // Fresh char with no skill CD so two skills can both land and generate energy.
     const noCd = makeChar();

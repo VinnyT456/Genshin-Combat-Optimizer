@@ -52,10 +52,17 @@ export async function addRotationStep(step: SeedStep): Promise<void> {
   });
 
   // The add button's accessible name states its full outcome (§14.4), so match
-  // on the two facts under test rather than on the whole sentence.
+  // on the two facts under test rather than on the whole sentence. Characters
+  // with a tap/hold skill now expose two matching controls; this legacy seed
+  // intentionally uses the first, tap, form unless a test asks for hold.
   const pattern = new RegExp(`${step.character}.*${ACTION_LABEL_ZH[step.action]}`);
   await act(async () => {
-    fireEvent.click(within(addBar()).getByRole("button", { name: pattern }));
+    const matches = within(addBar()).getAllByRole("button", { name: pattern });
+    const button = step.action === "skill"
+      ? matches.find((candidate) => candidate.getAttribute("aria-label")?.includes("点按施放")) ?? matches[0]
+      : matches[0];
+    if (button === undefined) throw new Error(`missing add control for ${step.character} ${step.action}`);
+    fireEvent.click(button);
   });
 }
 

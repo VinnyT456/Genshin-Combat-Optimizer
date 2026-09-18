@@ -30,6 +30,7 @@ import {
   improvementTone,
   objectiveLabel,
   searchEffortLabel,
+  searchStatusLabel,
   type SearchPhase,
 } from "./searchPresentation";
 
@@ -199,7 +200,9 @@ export function RotationSearchPanel({
 
       <div className={cn(CARD, "space-y-3 p-4")} role="region" aria-labelledby={`${durationId}-status-heading`} aria-busy={searching}>
         <h3 id={`${durationId}-status-heading`} className="text-sm font-semibold text-slate-200">搜索状态</h3>
-        {phase === "queued" ? <p className="text-sm text-slate-300">正在准备搜索…</p> : phase === "searching" ? <p className="text-sm text-slate-300">{SEARCHING_NOTICE}</p> : phase === "canceling" ? <p className="text-sm text-slate-300">正在取消…</p> : phase === "canceled" ? <p className="text-sm text-slate-300">搜索已取消。当前配置和已有结果均已保留。</p> : phase === "failed" ? <p className="text-sm text-slate-300">搜索未完成。</p> : <p className="text-sm text-slate-400">搜索尚未运行。</p>}
+        <p className={cn("text-sm", phase === "idle" ? "text-slate-400" : "text-slate-300")}>
+          {searchStatusLabel(phase)}
+        </p>
         {searching && <p className="text-xs text-slate-500">{SEARCH_UNSUPPORTED_NOTICE}</p>}
         {draftChanged && <p className="rounded-sm border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-200">当前配置已更改。本次搜索仍使用开始时的配置；结果完成后不会自动应用。</p>}
       </div>
@@ -248,7 +251,7 @@ export function RotationSearchPanel({
         <div className={cn(CARD, "p-6 text-center")}>
           <p className="text-sm font-semibold text-slate-200">尚未搜索循环</p>
           <p className="mt-1.5 text-xs text-slate-400">
-            设置搜索目标、时间窗口与投入程度后，开始查找当前阵容可执行的循环。
+            设置搜索目标、时间窗口与投入程度后，在保留当前动作集合的前提下比较不同顺序。
           </p>
         </div>
       )}
@@ -269,6 +272,9 @@ export function RotationSearchPanel({
                 outcome.beamWidth,
                 outcome.nodesExpanded,
                 outcome.durationSeconds,
+              )}
+              {outcome.totalEvaluations !== undefined && (
+                <> · 组合评估 {outcome.totalEvaluations} 次</>
               )}
             </span>
           </div>

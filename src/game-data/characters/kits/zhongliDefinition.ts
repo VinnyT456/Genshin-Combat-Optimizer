@@ -9,20 +9,25 @@ export function createZhongliDefinition(
   overrides: Partial<Pick<GenericCharacterDefinition, "level" | "ascensionPhase" | "baseStats">> = {},
 ): GenericCharacterDefinition {
   const level = Math.max(0, Math.min(6, Math.trunc(constellationLevel)));
+  const tapSkill = { ...zhongli.skill, instances: zhongli.skill.instances.slice(0, 1) };
+  const holdInstance = zhongli.skill.instances[2];
+  if (holdInstance === undefined) throw new Error("Zhongli skill is missing its sourced Hold DMG row");
+  const holdSkill = { ...zhongli.skill, instances: [holdInstance] };
 
   return {
     ...zhongli,
     ...overrides,
     constellationLevel: level,
     talentLevels,
-    // A generic skill cast cannot distinguish hold damage from pillar resonance ticks.
-    skill: { ...zhongli.skill, instances: zhongli.skill.instances.slice(0, 1) },
+    // Resonance is still lifecycle-dependent, but the direct Tap and Hold
+    // damage rows are now addressable as separate sequence actions.
+    skill: tapSkill,
+    skillVariants: { tap: tapSkill, hold: holdSkill },
   };
 }
 
 export const ZHONGLI_KIT_METADATA = {
   unsupportedMechanics: [
-    "skillHoldDamageRequiresHoldAction",
     "stoneSteleResonanceRequiresPillarLifecycleAndTiming",
     "a1JadeShieldFortificationStacks",
     "a4MaxHpBasedDamageForNormalSkillAndBurst",

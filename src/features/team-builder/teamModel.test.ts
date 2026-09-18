@@ -13,6 +13,7 @@ import {
   members,
   moveSlot,
   referenceCharacterLevel,
+  retainTeamActions,
   orphanedActionCount,
   resolveActiveId,
   setSlot,
@@ -151,6 +152,27 @@ describe("orphanedActionCount", () => {
 
   it("counts every action for an empty team", () => {
     expect(orphanedActionCount(emptyTeam(), ["a", "b"])).toBe(2);
+  });
+});
+
+describe("retainTeamActions", () => {
+  it("removes restored actions for characters outside the current team", () => {
+    const rotation = [
+      { characterId: "a", actionType: "skill" as const },
+      { characterId: "old-character", actionType: "burst" as const },
+      { characterId: "a", actionType: "normal" as const },
+    ];
+
+    expect(retainTeamActions(teamFrom([a]), rotation)).toEqual([
+      rotation[0],
+      rotation[2],
+    ]);
+  });
+
+  it("returns an empty sequence when no restored action belongs to the team", () => {
+    expect(retainTeamActions(teamFrom([a]), [
+      { characterId: "old-character", actionType: "skill" },
+    ])).toEqual([]);
   });
 });
 

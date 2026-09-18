@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { allCharacters } from "@/game-data";
 import { testEnemy } from "@/game-data/enemies/testEnemy";
 import { testPyro } from "@/game-data/characters/testPyro";
+import { toWebsiteCharacter } from "@/features/team-builder/rosterModel";
 import type { SearchRequest } from "./optimizerAdapter";
 import {
   canonicalizeSerializable,
@@ -23,6 +25,12 @@ const request: SearchRequest = {
 describe("search transport request identity", () => {
   it("canonicalizes object key order and gives equivalent requests one identity", () => {
     expect(canonicalizeSerializable({ b: 2, a: 1 })).toBe('{"a":1,"b":2}');
+    expect(canonicalizeSerializable({ omitted: undefined, nested: { alsoOmitted: undefined, value: 1 } })).toBe(
+      '{"nested":{"value":1}}',
+    );
+    expect(canonicalizeSerializable({ value: 1 })).toBe(
+      canonicalizeSerializable({ value: 1, optional: undefined }),
+    );
     expect(fingerprintSerializable({ b: 2, a: 1 })).toBe(
       fingerprintSerializable({ a: 1, b: 2 }),
     );
@@ -42,6 +50,27 @@ describe("search transport request identity", () => {
     const cyclic: { self?: unknown } = {};
     cyclic.self = cyclic;
     expect(() => canonicalizeSerializable(cyclic)).toThrow(/cyclic/);
+  });
+
+  it("round-trips permanent-effect Infinity through a frozen search payload", () => {
+    const envelope = createSearchJobRequest("non-finite-config", {
+      ...request,
+      config: { timeLimit: Number.POSITIVE_INFINITY },
+    });
+
+    expect(envelope.payload.config.timeLimit).toBe(Number.POSITIVE_INFINITY);
+    expect(Object.isFrozen(envelope.payload)).toBe(true);
+    expect(Object.isFrozen(envelope.payload.config)).toBe(true);
+    expect(envelope.inputFingerprint).toMatch(/^fnv1a-[0-9a-f]{8}$/);
+  });
+
+  it("accepts a real website character with optional kit fields", () => {
+    const character = allCharacters.find((entry) => entry.id === "skirk");
+    expect(character).toBeDefined();
+    expect(() => createSearchJobRequest("website-character", {
+      ...request,
+      team: [toWebsiteCharacter(character!)],
+    })).not.toThrow();
   });
 });
 

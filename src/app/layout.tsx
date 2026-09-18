@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { SkipLink } from "@/components/ui/SkipLink";
 import { MAIN_CONTENT_ID } from "@/components/ui/landmarks";
+import { LanguageProvider } from "@/components/ui/LanguageProvider";
 
 export const metadata: Metadata = {
   title: "原神战斗输出循环模拟器 | Genshin Rotation Optimizer",
@@ -18,8 +19,10 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className="min-h-screen antialiased">
-        <SkipLink targetId={MAIN_CONTENT_ID} />
-        {children}
+        <LanguageProvider>
+          <SkipLink targetId={MAIN_CONTENT_ID} />
+          {children}
+        </LanguageProvider>
       </body>
     </html>
   );

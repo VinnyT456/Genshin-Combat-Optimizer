@@ -36,7 +36,8 @@ import {
 // The wire between the user's equipment choices and the simulation config.
 //
 // THE GAP THIS CLOSES. Every half of this chain already existed and was tested:
-// `weaponPassiveBuffs()` emits per-refinement `Buff` data for 6 weapons,
+// `weaponPassiveBuffs()` emits per-refinement `Buff` data for every translated
+// weapon passive,
 // `setBonusBuffs()` emits 46 modelled set bonuses,
 // `harvestWeaponPassiveBuffs()` / `harvestArtifactSetBuffs()` select and gate
 // them, and `simulateRotation()` composes the result into the damage pipeline.

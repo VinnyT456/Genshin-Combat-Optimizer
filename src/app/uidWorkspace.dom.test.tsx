@@ -55,4 +55,20 @@ describe("UID entry handoff", () => {
     expect(screen.getByRole("button", { name: "添加角色至 1 号位" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "执行循环模拟" })).toBeDisabled();
   });
+
+  it("does not restore actions from a character removed by the current UID roster", async () => {
+    const draftWithOldAction = {
+      ...oldDraft,
+      team: [bennett, null, null, null],
+      rotation: [{ characterId: "raiden-shogun", actionType: "skill" as const }],
+    };
+    importBennett();
+    window.sessionStorage.setItem(workspaceDraftKey("uid"), serializeWorkspaceDraft(draftWithOldAction));
+
+    render(<WorkspacePage />);
+
+    await screen.findByRole("button", { name: "执行循环模拟" });
+    expect(screen.getByText("尚未编排任何动作。")).toBeInTheDocument();
+    expect(screen.queryByText("雷电将军")).toBeNull();
+  });
 });

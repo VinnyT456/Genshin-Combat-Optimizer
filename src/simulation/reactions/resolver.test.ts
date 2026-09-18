@@ -254,7 +254,10 @@ describe("toReactionModifiers — pipeline channel separation", () => {
       stats,
       noRes,
     );
-    expect(mods).toEqual(NO_REACTION_MODIFIERS);
+    expect(mods.amplifyingMultiplier).toBe(1);
+    expect(mods.additiveBaseDamageBonus).toBe(0);
+    expect(mods.transformative).toHaveLength(0);
+    expect(mods.reactionKinds).toEqual(["crystallize", "frozen"]);
   });
 
   it("exposes crystallized aura element for event-driven set effects", () => {

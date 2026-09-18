@@ -4,7 +4,10 @@ import type {
   SimulationSnapshot,
 } from "@/types";
 import { cloneEnergyState } from "@/simulation/energy";
-import { cloneCooldownState } from "@/simulation/cooldowns";
+import {
+  cloneAbilityChargeState,
+  cloneCooldownState,
+} from "@/simulation/cooldowns";
 import { restoreEnemyAuras } from "@/simulation/engine/reactionSeam";
 import type { EnemyAuraStore } from "@/simulation/engine/reactionSeam";
 
@@ -12,8 +15,8 @@ import type { EnemyAuraStore } from "@/simulation/engine/reactionSeam";
 // B2 — resuming a simulation from a checkpoint.
 //
 // `simulateRotation` already PRODUCES a `SimulationSnapshot` carrying every
-// piece of cross-action state (energy, cooldowns, normal-string position, ICD
-// counters, resources, stance, enemy aura). This module is the exact INVERSE:
+// piece of cross-action state (energy, cooldowns, ability charges, normal-string
+// position, ICD counters, resources, stance, enemy aura). This module is the exact INVERSE:
 // it pours a snapshot back into freshly-initialised state so a run can start
 // at `snapshot.time` instead of at t=0.
 //
@@ -37,8 +40,8 @@ import type { EnemyAuraStore } from "@/simulation/engine/reactionSeam";
 // and tests must compare resumed vs from-zero runs within that relative
 // tolerance and must NOT assert exact equality.
 //
-// Everything else in the snapshot (energy, cooldowns, ICD counters, resource
-// values, string index) is carried exactly, so the tolerance applies to the
+// Everything else in the snapshot (energy, cooldowns, ability charges, ICD
+// counters, resource values, string index) is carried exactly, so the tolerance applies to the
 // aura channel alone and to damage that depends on it.
 // ---------------------------------------------------------------------------
 //
@@ -73,7 +76,7 @@ export interface ResumedRunState {
  *
  * Pure with respect to the snapshot: nothing in `snapshot` is retained by
  * reference in a way that lets a later mutation leak back into it. Energy,
- * cooldowns, ICD and resource bags are all copied.
+ * cooldowns, ability charges, ICD and resource bags are all copied.
  */
 export function restoreFromSnapshot(
   states: ReadonlyMap<string, CharacterState>,
@@ -93,6 +96,9 @@ export function restoreFromSnapshot(
 
     state.energy = cloneEnergyState(characterSnapshot.energy);
     state.cooldowns = cloneCooldownState(characterSnapshot.cooldowns);
+    if (characterSnapshot.abilityCharges !== undefined) {
+      state.abilityCharges = cloneAbilityChargeState(characterSnapshot.abilityCharges);
+    }
     if (characterSnapshot.maxHp !== undefined) state.maxHp = characterSnapshot.maxHp;
     if (characterSnapshot.currentHp !== undefined) state.currentHp = characterSnapshot.currentHp;
     if (characterSnapshot.shielded !== undefined) state.shielded = characterSnapshot.shielded;

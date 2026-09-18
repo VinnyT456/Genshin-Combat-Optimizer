@@ -96,6 +96,15 @@ function foldConvertedValueIntoStats(
     case "flatDamageBonus":
       target.flatDamageBonus = (target.flatDamageBonus ?? 0) + convertedValue;
       break;
+    case "baseDmgMultiplier":
+      if (conversion.damageType !== undefined) {
+        const current = target.baseDmgMultiplier?.[conversion.damageType] ?? 1;
+        target.baseDmgMultiplier = {
+          ...(target.baseDmgMultiplier ?? {}),
+          [conversion.damageType]: current + convertedValue,
+        };
+      }
+      break;
     case "elementalDmgBonus":
       if (conversion.element !== undefined) {
         const current = target.elementalDmgBonus[conversion.element] ?? 0;

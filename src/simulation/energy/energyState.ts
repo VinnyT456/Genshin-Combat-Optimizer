@@ -8,8 +8,16 @@ import type { CharacterDefinition, EnergyGainModifier, EnergyState } from "@/typ
 // resulting amount and enforces the cap.
 // ============================================================================
 
-export function createEnergyState(def: CharacterDefinition): EnergyState {
-  return { current: 0, max: def.maxEnergy, totalGained: 0, totalSpent: 0 };
+export function createEnergyState(
+  def: CharacterDefinition,
+  startWithFullEnergy = false,
+): EnergyState {
+  return {
+    current: startWithFullEnergy ? def.maxEnergy : 0,
+    max: def.maxEnergy,
+    totalGained: 0,
+    totalSpent: 0,
+  };
 }
 
 /** Immutable copy — used when snapshotting for the optimizer / frontend. */

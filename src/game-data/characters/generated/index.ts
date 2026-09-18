@@ -16,6 +16,7 @@ import { electroGeneratedCharacters } from "./electro";
 import { geoGeneratedCharacters } from "./geo";
 import { hydroGeneratedCharacters } from "./hydro";
 import { pyroGeneratedCharacters } from "./pyro";
+import { withCharacterUsage } from "../usageProfile";
 
 export { anemoGeneratedCharacters } from './anemo';
 export { cryoGeneratedCharacters } from './cryo';
@@ -57,7 +58,7 @@ export const generatedCharacters: readonly GenericCharacterDefinition[] = [
   ...geoGeneratedCharacters,
   ...hydroGeneratedCharacters,
   ...pyroGeneratedCharacters,
-];
+].map(withCharacterUsage);
 
 export const generatedCharactersById: ReadonlyMap<string, GenericCharacterDefinition> =
   new Map(generatedCharacters.map((character) => [character.id, character]));

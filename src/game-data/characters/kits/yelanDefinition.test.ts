@@ -88,8 +88,58 @@ describe("Yelan runtime kit", () => {
   it("fails closed for unrepresented proc routes and lists unsupported mechanics", () => {
     const result = run(6, ["burst", "skill"]);
     const coordinated = damageEvents(result).filter((event) => event.damage?.abilityId === "yelan-exquisite-throw-coordinated");
-    expect(coordinated).toHaveLength(0);
-    expect(YELAN_KIT_METADATA.unsupportedChannels).toContain("burstExquisiteThrowTriggeredByLifelineDetonation");
-    expect(YELAN_KIT_METADATA.unsupportedChannels).toContain("c2ExtraExquisiteThrowHit");
+    expect(coordinated).toHaveLength(3);
+    expect(YELAN_KIT_METADATA.supportedChannels).toContain("c2ExtraWaterArrow");
+    expect(YELAN_KIT_METADATA.supportedChannels).toContain("c6FiveBreakthroughBarbs");
+  });
+
+  it("adds one C2 water arrow on its independent 1.8s cooldown", () => {
+    const hits = damageEvents(run(2, ["burst", "normal"]));
+    expect(hits.filter((event) => event.damage?.abilityId === "yelan-c2-water-arrow")).toHaveLength(1);
+  });
+
+  it("adds one C4 marked-enemy HP stack after Lifeline resolves", () => {
+    const c0 = damageEvents(run(0, ["skill", "burst"]));
+    const c4Result = run(4, ["skill", "burst"]);
+    const c4 = damageEvents(c4Result);
+    expect(c4Result.finalState.characters.yelan?.resources?.["yelan-c4-marked-enemies"]?.value).toBe(1);
+    expect(c4.find((event) => event.damage?.abilityId === "yelan-burst")?.damage?.finalDamage)
+      .toBeGreaterThan(c0.find((event) => event.damage?.abilityId === "yelan-burst")?.damage?.finalDamage ?? 0);
+  });
+
+  it("refreshes party Max HP after a C4 mark is gained", () => {
+    const yelan = readyYelan(4);
+    const result = simulateRotation(
+      [yelan, testPyro],
+      [{ characterId: yelan.id, actionType: "skill" }],
+      testEnemy,
+      noCrit,
+    );
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.finalState.characters.yelan?.maxHp ?? 0).toBeGreaterThan(yelan.baseStats.hp);
+    expect(result.finalState.characters[testPyro.id]?.maxHp ?? 0).toBeGreaterThan(testPyro.baseStats.hp);
+  });
+
+  it("replaces five C6 normals with Charged Attack Breakthrough Barbs", () => {
+    const result = run(6, ["burst", "normal", "normal", "normal", "normal", "normal"]);
+    const barbs = damageEvents(result).filter((event) => event.damage?.abilityId === "yelan-c6-breakthrough-barb");
+    expect(barbs).toHaveLength(5);
+    expect(barbs.every((event) => event.damage?.damageType === "charged" && event.damage.element === "hydro")).toBe(true);
+    expect(result.finalState.characters.yelan?.resources?.["yelan-mastermind-arrows"]?.value).toBe(0);
+  });
+
+  it("ramps Adapt With Ease from 1% by 3.5% per second", () => {
+    const yelan = readyYelan(0);
+    const result = simulateRotation(
+      [yelan],
+      [
+        { characterId: yelan.id, actionType: "burst" },
+        ...Array.from({ length: 35 }, () => ({ characterId: yelan.id, actionType: "normal" as const })),
+      ],
+      testEnemy,
+      { ...noCrit, timeLimit: 15 },
+    );
+    expect(result.finalState.characters.yelan?.resources?.["yelan-adapt-with-ease"]?.value).toBe(50);
   });
 });

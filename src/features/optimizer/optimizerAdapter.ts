@@ -13,15 +13,24 @@
 // than assuming the caller watched it run.
 // ---------------------------------------------------------------------------
 
-import { optimizeRotation } from "@/simulation/optimizer";
+import {
+  optimizeRotationPortfolio,
+  rotationKey,
+  type PortfolioOptimizationResult,
+} from "@/simulation/optimizer";
 import type {
   OptimizationObjective,
-  OptimizationResult,
-  OptimizerConfig,
   RankedRotation,
-} from "@/simulation/optimizer";
-import { toEngineCharacter } from "@/features/simulation/simulationAdapter";
+} from "@/simulation/optimizer/CONTRACT";
+import {
+  engineCompositionForTeam,
+  isWebsiteCharacter,
+  toEngineCharacter,
+} from "@/features/simulation/simulationAdapter";
 import type { WebsiteCharacterDefinition } from "@/features/simulation/simulationAdapter";
+import type { GenericCharacterDefinition } from "@/simulation/character/character";
+import { equipmentConfig } from "@/features/simulation/equipmentAdapter";
+import type { EquipmentSelections } from "@/features/team-builder/equipmentSelection";
 import type {
   CharacterDefinition,
   EnemyState,
@@ -73,8 +82,16 @@ export function beamWidthForBudget(budget: SearchBudget): number {
 
 /** Inputs the user chooses for a search. Plain data: worker-transferable. */
 export interface SearchRequest {
-  readonly team: readonly (CharacterDefinition | WebsiteCharacterDefinition)[];
+  readonly team: readonly (
+    | CharacterDefinition
+    | GenericCharacterDefinition
+    | WebsiteCharacterDefinition
+  )[];
   readonly enemy: EnemyState;
+  /** Current editor rotation. Optional only for legacy callers. */
+  readonly initialRotation?: Rotation;
+  /** Current editable weapons/artifacts, when available from the workspace. */
+  readonly equipment?: EquipmentSelections;
   readonly budget: SearchBudget;
   readonly objective: OptimizationObjective;
   readonly durationSeconds: number;
@@ -96,6 +113,9 @@ export interface SearchOutcome {
   readonly objective: OptimizationObjective;
   readonly durationSeconds: number;
   readonly beamWidth: number;
+  /** Portfolio metadata; optional for compatibility with persisted test fixtures. */
+  readonly totalEvaluations?: number;
+  readonly stopReason?: PortfolioOptimizationResult["stopReason"];
 }
 
 /**
@@ -112,8 +132,14 @@ export function clampSearchDuration(seconds: number): number {
   );
 }
 
+const MAX_EVALUATIONS_BY_BUDGET: Record<SearchBudget, number> = {
+  fast: 120,
+  balanced: 300,
+  thorough: 600,
+};
+
 /**
- * Runs a bounded rotation search.
+ * Runs the bounded portfolio rotation search.
  *
  * Blocking and synchronous — callers are responsible for yielding to the
  * browser before invoking it, so the "searching" state can paint.
@@ -122,28 +148,69 @@ export function runSearch(request: SearchRequest): SearchOutcome {
   const beamWidth = beamWidthForBudget(request.budget);
   const durationSeconds = clampSearchDuration(request.durationSeconds);
 
-  const optimizerConfig: OptimizerConfig = {
-    beamWidth,
-    simulationDuration: durationSeconds,
-    objective: request.objective,
-    topN: DEFAULT_TOP_N,
-  };
+  const composition = engineCompositionForTeam(request.team);
+  const engineTeam = request.team.map((character) =>
+    toEngineCharacter(character, composition),
+  );
+  const equipmentFields = request.equipment
+    ? equipmentConfig(
+        request.team.map((character) => ({
+          id: character.id,
+          stats: character.baseStats,
+          intrinsicStats: isWebsiteCharacter(character)
+            ? character.engineDefinition.baseStats
+            : character.baseStats,
+        })),
+        request.equipment,
+      )
+    : {};
+  const outcome = optimizeRotationPortfolio({
+    initialRotation: request.initialRotation ?? [],
+    team: engineTeam,
+    enemy: request.enemy,
+    simulationConfig: {
+      startWithFullEnergy: true,
+      ...equipmentFields,
+      ...request.config,
+    },
+    config: {
+      objective: request.objective,
+      simulationDuration: durationSeconds,
+      topN: DEFAULT_TOP_N,
+      maxEvaluations: MAX_EVALUATIONS_BY_BUDGET[request.budget],
+      maxDepth: 3,
+      beamWidth,
+      populationSize: request.budget === "fast" ? 8 : request.budget === "balanced" ? 12 : 18,
+      generations: request.budget === "fast" ? 4 : request.budget === "balanced" ? 8 : 12,
+      mutationRate: 1,
+      eliteCount: 2,
+      seed: 1,
+    },
+  });
 
-  const outcome: OptimizationResult = optimizeRotation(
-    request.team.map(toEngineCharacter),
-    request.enemy,
-    optimizerConfig,
-    request.config,
+  const candidates: RankedRotation[] = outcome.topRotations.map((candidate, index) => ({
+    candidateId: `portfolio-${rotationKey(candidate.rotation)}`,
+    rotation: candidate.rotation,
+    result: candidate.result,
+    score: candidate.score,
+    rank: index + 1,
+    tieBreakKey: rotationKey(candidate.rotation),
+  }));
+  const nodesExpanded = outcome.algorithmStats.reduce(
+    (total, stats) => total + stats.evaluations,
+    0,
   );
 
   return {
-    candidates: outcome.ranked,
+    candidates,
     requestedTopN: DEFAULT_TOP_N,
-    nodesExpanded: outcome.nodesExpanded,
+    nodesExpanded,
     budget: request.budget,
     objective: request.objective,
     durationSeconds,
     beamWidth,
+    totalEvaluations: outcome.totalEvaluations,
+    stopReason: outcome.stopReason,
   };
 }
 

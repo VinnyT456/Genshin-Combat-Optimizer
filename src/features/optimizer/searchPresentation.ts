@@ -75,7 +75,7 @@ export const OBJECTIVE_OPTIONS: readonly ObjectiveOption[] = [
  * use "global optimum" or "guaranteed in game" wording.
  */
 export const SEARCH_SCOPE_NOTICE =
-  "搜索会组合当前阵容可执行的切人、普通攻击、元素战技与元素爆发。" +
+  "搜索固定当前动作数量与动作集合，只尝试不同的执行顺序，并为每个可评估序列计算总伤害或DPS。" +
   "结果是本次预算内找到的候选；结果不覆盖所有可行循环，也不保证实战表现。";
 
 /** Shown above the candidate list, next to the incumbent-preserving copy. */
@@ -87,6 +87,20 @@ export const SEARCHING_NOTICE =
 
 export const EMPTY_RESULT_NOTICE =
   "本次搜索在上述阵容、敌人、时间窗口与投入程度下未返回候选。";
+
+/** Status copy distinguishes a completed empty search from an idle panel. */
+export function searchStatusLabel(phase: SearchPhase): string {
+  switch (phase) {
+    case "queued": return "正在准备搜索…";
+    case "searching": return SEARCHING_NOTICE;
+    case "canceling": return "正在取消…";
+    case "canceled": return "搜索已取消。当前配置和已有结果均已保留。";
+    case "failed": return "搜索未完成。";
+    case "empty": return "搜索已完成，但没有返回候选。";
+    case "results": return "搜索已完成。";
+    case "idle": return "搜索尚未运行。";
+  }
+}
 
 /**
  * Honest count summary for a Top-N list.

@@ -65,6 +65,7 @@ export interface ArtifactStatModifier {
   readonly value: number;
   readonly element?: string;
   readonly reaction?: string;
+  readonly damageType?: string;
 }
 
 /** A gate. Mirrors `BuffCondition` in `src/simulation/buffs/types.ts`. */

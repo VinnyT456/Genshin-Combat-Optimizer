@@ -34,12 +34,15 @@ export type ResourceStates = Record<string, ResourceState>;
 export function createResourceStates(
   definitions: readonly ResourceDefinition[],
   time = 0,
+  startWithFullEnergy = false,
 ): ResourceStates {
   const states: ResourceStates = {};
   for (const def of definitions) {
     states[def.id] = {
       id: def.id,
-      value: def.initial,
+      value: startWithFullEnergy && def.startAtMaxWithFullEnergy
+        ? def.max
+        : def.initial,
       max: def.max,
       lastChanged: time,
       ...(def.durationSeconds !== undefined

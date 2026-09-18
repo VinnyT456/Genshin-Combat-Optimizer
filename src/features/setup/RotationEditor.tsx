@@ -8,7 +8,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import type { CharacterDefinition, Rotation } from "@/types";
+import type { Rotation, SkillInputVariant } from "@/types";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
 import { ElementTag } from "@/components/ui/ElementTag";
@@ -51,7 +51,10 @@ import {
   missingSwapIndexes,
   moveAction,
   rowTimings,
+  skillInputVariantsFor,
+  skillVariantLabel,
   selectionAfterDelete,
+  type SequenceCharacter,
   summarizeRotation,
   type AddableActionType,
 } from "./rotationEditing";
@@ -59,7 +62,7 @@ import {
 interface Props {
   rotation: Rotation;
   onRotationChange: (next: Rotation) => void;
-  team: readonly (CharacterDefinition | null)[];
+  team: readonly (SequenceCharacter | null)[];
   /**
    * Effective cost of one swap, in seconds, from the run configuration
    * (§15.3/G4). Required, not defaulted: the editor must price a swap at
@@ -96,7 +99,7 @@ export function RotationEditor({
   swapCost,
 }: Props) {
   const activeMembers = useMemo(
-    () => team.filter((c): c is CharacterDefinition => c !== null),
+    () => team.filter((c): c is SequenceCharacter => c !== null),
     [team],
   );
   const characterById = useMemo(
@@ -178,13 +181,28 @@ export function RotationEditor({
   // Add
   // -------------------------------------------------------------------------
 
-  function handleAdd(actionType: AddableActionType) {
+  function handleAdd(
+    actionType: AddableActionType,
+    skillVariant?: SkillInputVariant,
+  ) {
     if (!pendingChar) return;
-    const result = insertAction(rotation, cursorIndex, pendingChar, actionType);
+    const result = insertAction(
+      rotation,
+      cursorIndex,
+      pendingChar,
+      actionType,
+      skillVariant,
+    );
     commit(
       result.rotation,
       result.actionIndex,
-      announceInsert(result, charNameZh(pendingChar.name), actionType, swapCost),
+      announceInsert(
+        result,
+        charNameZh(pendingChar.name),
+        actionType,
+        swapCost,
+        skillVariant,
+      ),
     );
   }
 
@@ -436,7 +454,11 @@ export function RotationEditor({
             const label =
               action.actionType === "swap"
                 ? `切至 ${displayName}`
-                : actionDisplayLabel(action.actionType);
+                : `${actionDisplayLabel(action.actionType)}${
+                    action.actionType === "skill" && action.skillVariant !== undefined
+                      ? `（${skillVariantLabel(action.skillVariant)}）`
+                      : ""
+                  }`;
             const menuOpen = rowMenu.kind !== "closed" && rowMenu.index === index;
 
             return (
@@ -696,41 +718,49 @@ export function RotationEditor({
           </div>
 
           <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center">
-            {ADDABLE_ACTION_TYPES.map((actionType) => {
+            {ADDABLE_ACTION_TYPES.flatMap((actionType) => {
               if (!pendingChar) {
-                return (
+                return [(
                   <Button key={actionType} size="sm" disabled>
                     {actionBadgeGlyph(actionType)} {actionDisplayLabel(actionType)}
                   </Button>
-                );
+                )];
               }
-              const duration =
-                actionDuration(
-                  { characterId: pendingChar.id, actionType },
-                  pendingChar,
-                  swapCost,
-                ) ?? 0;
-              const energy = actionType === "burst" ? pendingChar.maxEnergy : null;
-              return (
-                <Button
-                  key={actionType}
-                  size="sm"
-                  onClick={() => handleAdd(actionType)}
-                  aria-label={addButtonAccessibleName(
-                    selectedIndex,
-                    charNameZh(pendingChar.name),
-                    actionType,
-                    duration,
-                    energy,
-                  )}
-                >
-                  <span className="font-mono tabular-nums">
-                    {actionBadgeGlyph(actionType)} {actionDisplayLabel(actionType)}{" "}
-                    {formatSeconds(duration)}s
-                    {energy === null ? "" : ` · ${energy}能`}
-                  </span>
-                </Button>
-              );
+              const variants =
+                actionType === "skill" ? skillInputVariantsFor(pendingChar) : [];
+              const inputs: readonly (SkillInputVariant | undefined)[] =
+                variants.length > 0 ? variants : [undefined];
+              return inputs.map((skillVariant) => {
+                const duration =
+                  actionDuration(
+                    { characterId: pendingChar.id, actionType, skillVariant },
+                    pendingChar,
+                    swapCost,
+                  ) ?? 0;
+                const energy = actionType === "burst" ? pendingChar.maxEnergy : null;
+                const variantText =
+                  skillVariant === undefined ? "" : ` · ${skillVariantLabel(skillVariant)}`;
+                return (
+                  <Button
+                    key={`${actionType}-${skillVariant ?? "default"}`}
+                    size="sm"
+                    onClick={() => handleAdd(actionType, skillVariant)}
+                    aria-label={`${addButtonAccessibleName(
+                      selectedIndex,
+                      charNameZh(pendingChar.name),
+                      actionType,
+                      duration,
+                      energy,
+                    )}${skillVariant === undefined ? "" : `，${skillVariantLabel(skillVariant)}施放`}`}
+                  >
+                    <span className="font-mono tabular-nums">
+                      {actionBadgeGlyph(actionType)} {actionDisplayLabel(actionType)}
+                      {variantText} {formatSeconds(duration)}s
+                      {energy === null ? "" : ` · ${energy}能`}
+                    </span>
+                  </Button>
+                );
+              });
             })}
           </div>
 

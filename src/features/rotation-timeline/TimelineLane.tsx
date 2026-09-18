@@ -113,7 +113,9 @@ export function TimelineLane({
               aria-pressed={selected}
               aria-label={action.label}
               title={
-                action.clamped
+                action.instant
+                  ? `${action.label} · 即时命中`
+                  : action.clamped
                   ? `${action.label} · 持续 ${formatSeconds(action.duration)}`
                   : action.label
               }
@@ -127,13 +129,18 @@ export function TimelineLane({
                 "absolute top-1 bottom-1 flex items-center justify-start overflow-hidden rounded-sm border-l-2 px-1 text-left",
                 "opacity-80 hover:opacity-100 transition-opacity duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-1 focus-visible:ring-offset-surface",
-                spanFillClass(action.element),
+                action.instant
+                  ? "border-cyan-100 bg-transparent px-0"
+                  : spanFillClass(action.element),
                 selected && "opacity-100 ring-2 ring-amber-400",
               )}
             >
               <span
                 aria-hidden="true"
-                className="font-mono text-micro font-bold text-black/80"
+                className={cn(
+                  "font-mono text-micro font-bold text-black/80",
+                  action.instant && "hidden",
+                )}
               >
                 {classGlyph}
               </span>

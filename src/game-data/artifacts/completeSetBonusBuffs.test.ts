@@ -80,6 +80,35 @@ describe("complete artifact set compiler", () => {
     });
   });
 
+  it("keeps wearer-only artifact buffs on the wearer and supports zero-energy users", () => {
+    const finale = completeSetBonusBuffsById("finale-of-the-deep-galleries");
+    expect(finale?.fourPiece).toHaveLength(2);
+    expect(finale?.fourPiece?.map((buff) => buff.targets)).toEqual([
+      { scope: "self" },
+      { scope: "self" },
+    ]);
+    expect(finale?.fourPiece?.map((buff) => buff.conditions)).toEqual([
+      {
+        damageTypes: ["normal"],
+        requiresZeroEnergy: true,
+        resources: [{ resourceId: "artifact:finale-normal-disabled", comparator: "lt", value: 1, owner: "source" }],
+      },
+      {
+        damageTypes: ["burst"],
+        requiresZeroEnergy: true,
+        resources: [{ resourceId: "artifact:finale-burst-disabled", comparator: "lt", value: 1, owner: "source" }],
+      },
+    ]);
+    expect(finale?.fourPiece?.every((buff) => buff.conditions?.maxEnergyFraction === undefined)).toBe(true);
+
+    const goldenTroupe = completeSetBonusBuffsById("golden-troupe")?.fourPiece;
+    expect(goldenTroupe?.map((buff) => buff.targets)).toEqual([
+      { scope: "self" },
+      { scope: "self" },
+    ]);
+    expect(goldenTroupe?.[1]?.conditions?.requiresOnField).toBe(false);
+  });
+
   it("wires the remaining deterministic stat and damage rows", () => {
     const expected = [
       ["adventurer", "twoPiece"],

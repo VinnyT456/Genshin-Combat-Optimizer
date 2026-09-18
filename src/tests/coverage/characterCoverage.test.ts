@@ -939,17 +939,11 @@ describe("Playable Character Coverage Matrix & Zero-Overclaim Verification (TASK
       "no gap kind fires anywhere on the real roster — the matrix has gone entirely blind",
     ).toBeGreaterThan(0);
 
-    // These detectors depend on fields the cutover removed, so they cannot
-    // fire today. Pinned so that their RETURN is noticed.
-    for (const silenced of [
-      "element-infusion",
-      "conditional-resource-effect",
-    ] as const) {
-      expect(
-        kinds.has(silenced),
-        `${silenced} fires again — kit behaviour has landed; revisit the PARTIAL claim and the unmodelled-perk-effects assertions above`,
-      ).toBe(false);
-    }
+    // Infusion remains absent from the generated roster, while the explicit
+    // Skirk/Mavuika resource channel is now intentionally visible to the
+    // coverage detector.
+    expect(kinds.has("element-infusion")).toBe(false);
+    expect(kinds.has("conditional-resource-effect")).toBe(true);
   });
 
   it("generates a full markdown coverage report for all 80+ playable characters", () => {

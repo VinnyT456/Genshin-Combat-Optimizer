@@ -20,6 +20,7 @@ import { createReplayInputFingerprint, rotationFingerprint } from "./replayCerti
 import { generateCandidateActions } from "./actionGenerator";
 import { stateKey } from "./stateKey";
 import { admitCandidate, hasSkippedActions } from "./candidateAdmission";
+import { actionKeySegment, rotationKey } from "./rotationIdentity";
 
 // ============================================================================
 // Beam Search Optimizer
@@ -150,21 +151,6 @@ function accumulatedScore(
     return endTime > 0 ? totalDamage / endTime : 0;
   }
   return totalDamage;
-}
-
-/**
- * Generates a stable string key for a rotation.
- */
-function actionKeySegment(a: RotationAction): string {
-  return `${a.characterId}:${a.actionType}:${a.abilityId ?? ""}:${a.normalIndex ?? ""};`;
-}
-
-function rotationKey(rotation: Rotation): string {
-  let s = "";
-  for (let i = 0; i < rotation.length; i++) {
-    s += actionKeySegment(rotation[i]!);
-  }
-  return s;
 }
 
 /** Cached key, falling back to derivation for nodes built without one. */

@@ -4,6 +4,8 @@ import type {
   DamageInstanceDefinition,
   KitAbility,
   ResourceScalingTerm,
+  PartyHpDamageBonus,
+  HealthChangeDefinition,
 } from "@/simulation/character/kit";
 import type { ScalingTerm } from "@/simulation/character/scaling";
 import { evaluateIcd } from "@/simulation/reactions/icd";
@@ -37,6 +39,7 @@ export type TalentChannel = "normal" | "skill" | "burst";
  * level in game — a mapping, declared once here, not a branch at each call.
  */
 export function talentChannelForSlot(ability: KitAbility): TalentChannel {
+  if (ability.talentChannel !== undefined) return ability.talentChannel;
   switch (ability.slot) {
     case "skill":
       return "skill";
@@ -60,6 +63,8 @@ export interface PlannedHit {
   scaling: readonly ScalingTerm[];
   /** Resource terms are materialised by the engine at the appropriate time. */
   resourceScaling?: readonly ResourceScalingTerm[];
+  partyHpDamageBonus?: PartyHpDamageBonus;
+  hpChangesBeforeHit?: readonly HealthChangeDefinition[];
   element: Element;
   damageType: DamageType;
   /**
@@ -206,6 +211,12 @@ export function planAbility(input: PlanAbilityInput): readonly PlannedHit[] {
       damageType: instance.damageType,
       ...(instance.resourceScaling !== undefined
         ? { resourceScaling: instance.resourceScaling }
+        : {}),
+      ...(instance.partyHpDamageBonus !== undefined
+        ? { partyHpDamageBonus: instance.partyHpDamageBonus }
+        : {}),
+      ...(instance.hpChangesBeforeHit !== undefined
+        ? { hpChangesBeforeHit: instance.hpChangesBeforeHit }
         : {}),
     };
 

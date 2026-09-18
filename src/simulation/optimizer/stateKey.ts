@@ -18,8 +18,8 @@ import { MEMO_KEY_DECIMAL_PLACES } from "./CONTRACT";
 //
 // The key therefore covers EVERY field `CharacterSnapshot` /
 // `SimulationSnapshot` carry across actions:
-//   energy, cooldowns, normalStringIndex, icd, resources, activeStance,
-//   and the per-enemy aura.
+//   energy, cooldowns, ability charges, normalStringIndex, icd, resources,
+//   activeStance, and the per-enemy aura.
 //
 // Floats are quantized before hashing (CONTRACT REQUIREMENT 3). Continuous
 // quantities are the result of accumulated arithmetic, so two states equal in
@@ -62,6 +62,19 @@ function characterKey(snapshot: CharacterSnapshot): string {
     cooldowns += `${id}=${q(snapshot.cooldowns[id]!)},`;
   }
   parts.push(cooldowns);
+
+  if (snapshot.abilityCharges === undefined) {
+    parts.push(ABSENT);
+  } else {
+    let charges = "";
+    for (const id of sortedKeys(snapshot.abilityCharges)) {
+      const state = snapshot.abilityCharges[id]!;
+      charges += `${id}=${state.current}/${state.max}/${state.rechargeAt
+        .map(q)
+        .join(",")},`;
+    }
+    parts.push(charges);
+  }
 
   // ICD: absence is NOT neutral (an absent counter means "first hit ever",
   // which always applies its element), so absent and empty must hash apart.

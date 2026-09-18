@@ -58,7 +58,7 @@ export function TimelineList({
               aria-pressed={selected}
               onClick={() => onSelect(eventIndex)}
               className={cn(
-                "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-hover",
+                "flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-hover",
                 TRANSITION_COLORS,
                 FOCUS_RING,
                 selected && "bg-amber-500/10",

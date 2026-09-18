@@ -1,5 +1,6 @@
 import type {
   Element,
+  DamageType,
   ReactionBonusKey,
   ReactionBonusMap,
   Stats,
@@ -14,6 +15,7 @@ import type {
   StatModifier,
   CharacterResistanceModifier,
 } from "@/simulation/buffs/types";
+import type { BuffContext } from "@/types";
 
 
 import { applyActiveConversions } from "@/simulation/buffs/conversions";
@@ -63,6 +65,8 @@ interface ModifierTotals {
   energyRecharge: number;
   dmgBonus: number;
   flatDamageBonus: number;
+  /** Additive bonuses to the identity base multiplier (1.0). */
+  baseDmgMultiplier: Partial<Record<DamageType, number>>;
   elementalDmgBonus: Partial<Record<Element, number>>;
   /**
    * `ReactionBonus` per reaction (KQM `combat-mechanics/damage/damage-formula`),
@@ -86,6 +90,7 @@ function emptyTotals(): ModifierTotals {
     energyRecharge: 0,
     dmgBonus: 0,
     flatDamageBonus: 0,
+    baseDmgMultiplier: {},
     elementalDmgBonus: {},
     reactionBonus: {},
   };
@@ -130,6 +135,16 @@ function applyModifier(
     return;
   }
 
+  if (modifier.stat === "baseDmgMultiplier") {
+    if (modifier.damageType === undefined) {
+      skippedKeyedModifiers.push(modifier.stat);
+      return;
+    }
+    const current = totals.baseDmgMultiplier[modifier.damageType] ?? 0;
+    totals.baseDmgMultiplier[modifier.damageType] = current + amount;
+    return;
+  }
+
   totals[modifier.stat] += amount;
 }
 
@@ -157,6 +172,59 @@ export function sumModifiersWithDiagnostics(active: readonly ActiveBuff[]): {
 /** Sum every modifier carried by the active buffs. Pure. */
 export function sumModifiers(active: readonly ActiveBuff[]): ModifierTotals {
   return sumModifiersWithDiagnostics(active).totals;
+}
+
+function liveResourceValue(
+  resource: { value: number; lastChanged: number; durationSeconds?: number } | undefined,
+  time: number,
+): number {
+  if (resource === undefined) return 0;
+  if (
+    resource.durationSeconds !== undefined &&
+    time - resource.lastChanged >= resource.durationSeconds
+  ) return 0;
+  return resource.value;
+}
+
+/** Fold resource-backed modifiers after ordinary modifiers/conversions. */
+export function applyResourceModifiers(
+  base: Stats,
+  active: readonly ActiveBuff[],
+  context: BuffContext,
+  explicitBaseValues: BaseStatValues = {},
+): Stats {
+  const totals = emptyTotals();
+  for (const { buff, stacks } of active) {
+    for (const modifier of buff.resourceModifiers ?? []) {
+      const ownerId = modifier.owner === "source"
+        ? buff.sourceCharacterId
+        : context.character.id;
+      const resource = ownerId === undefined
+        ? undefined
+        : context.snapshot?.characters[ownerId]?.resources?.[modifier.resourceId];
+      const value = liveResourceValue(resource, context.time);
+      const converted = Math.min(
+        modifier.maxCap ?? Number.POSITIVE_INFINITY,
+        Math.max(0, value - (modifier.threshold ?? 0)) * modifier.ratio * stacks,
+      );
+      if (!(converted > 0) || !Number.isFinite(converted)) continue;
+      applyModifier(totals, {
+        stat: modifier.targetStat,
+        value: converted,
+        ...(modifier.damageType !== undefined ? { damageType: modifier.damageType } : {}),
+      }, 1, []);
+    }
+  }
+  if (
+    totals.atkPercent === 0 && totals.atkFlat === 0 &&
+    totals.hpPercent === 0 && totals.hpFlat === 0 &&
+    totals.defPercent === 0 && totals.defFlat === 0 &&
+    totals.elementalMastery === 0 && totals.critRate === 0 &&
+    totals.critDmg === 0 && totals.energyRecharge === 0 &&
+    totals.dmgBonus === 0 && totals.flatDamageBonus === 0
+    && Object.keys(totals.baseDmgMultiplier).length === 0
+  ) return base;
+  return applyTotals(base, totals, resolveBaseValues(base, explicitBaseValues)).stats;
 }
 
 /** Resolved character-side defensive channels for one hit/state query. */
@@ -356,7 +424,16 @@ export function applyTotals(
     reactionBonus[key] = (reactionBonus[key] ?? 0) + (bonus ?? 0);
   }
   const hasReactionBonus = Object.keys(reactionBonus).length > 0;
-
+  const baseDmgMultiplier: Partial<Record<DamageType, number>> = {
+    ...(base.baseDmgMultiplier ?? {}),
+  };
+  for (const [damageType, bonus] of Object.entries(totals.baseDmgMultiplier)) {
+    const key = damageType as DamageType;
+    // Buff values are bonuses to the identity multiplier. This preserves the
+    // existing Stats representation, where an authored 1.5 means 150% of the
+    // talent motion value, while allowing several conditional buffs to add.
+    baseDmgMultiplier[key] = (baseDmgMultiplier[key] ?? 1) + (bonus ?? 0);
+  }
   const stats: Stats = {
     atk: foldChannel(
       base.atk,
@@ -396,7 +473,10 @@ export function applyTotals(
       ? { flatDamageBonus: (base.flatDamageBonus ?? 0) + totals.flatDamageBonus }
       : {}),
     ...(base.baseDmgMultiplier !== undefined
-      ? { baseDmgMultiplier: { ...base.baseDmgMultiplier } }
+      ? { baseDmgMultiplier }
+      : {}),
+    ...(base.baseDmgMultiplier === undefined && Object.keys(totals.baseDmgMultiplier).length > 0
+      ? { baseDmgMultiplier }
       : {}),
     // Spread-or-nothing: omits the key entirely when empty (see above).
     ...(hasReactionBonus ? { reactionBonus } : {}),

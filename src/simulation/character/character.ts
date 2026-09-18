@@ -6,8 +6,10 @@ import type {
   PassiveDefinition,
   Rarity,
   ResourceDefinition,
+  SkillVariantMap,
   WeaponType,
 } from "@/simulation/character/kit";
+import type { SkillInputVariant } from "@/types";
 
 // ============================================================================
 // Character definition (generic model).
@@ -107,6 +109,8 @@ export interface GenericCharacterDefinition {
   plungeLow?: KitAbility;
   plungeHigh?: KitAbility;
   skill: KitAbility;
+  /** Explicit tap/hold Skill alternatives, when the game has both forms. */
+  skillVariants?: SkillVariantMap;
   burst: KitAbility;
 
   passives: readonly PassiveDefinition[];
@@ -144,6 +148,25 @@ export function allAbilities(
   if (def.plungeHigh) out.push(def.plungeHigh);
   out.push(def.skill, def.burst);
   return out;
+}
+
+/** Returns the explicitly requested Skill input, or the default Skill. */
+export function skillForInputVariant(
+  def: GenericCharacterDefinition,
+  variant?: SkillInputVariant,
+): KitAbility | undefined {
+  return variant === undefined ? def.skill : def.skillVariants?.[variant];
+}
+
+/** Stable order for presenting and generating declared Skill input variants. */
+export const SKILL_INPUT_VARIANTS: readonly SkillInputVariant[] = ["tap", "hold"];
+
+export function declaredSkillInputVariants(
+  def: GenericCharacterDefinition,
+): readonly SkillInputVariant[] {
+  return SKILL_INPUT_VARIANTS.filter(
+    (variant) => def.skillVariants?.[variant] !== undefined,
+  );
 }
 
 /** Looks an ability up by id. Returns undefined when absent. */

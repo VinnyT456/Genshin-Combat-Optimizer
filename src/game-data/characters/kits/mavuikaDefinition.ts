@@ -10,6 +10,7 @@
 
 import type { GenericCharacterDefinition, TalentLevels } from "@/simulation/character/character";
 import { mavuika } from "../generated/pyro";
+import { withCharacterUsage } from "../usageProfile";
 
 const MAVUIKA_C3_BURST_TALENT_LEVELS = 3;
 const MAVUIKA_C5_SKILL_TALENT_LEVELS = 3;
@@ -21,7 +22,7 @@ export function createMavuikaDefinition(
 ): GenericCharacterDefinition {
   const level = Math.max(0, Math.min(6, Math.trunc(constellationLevel)));
 
-  return {
+  return withCharacterUsage({
     ...mavuika,
     ...overrides,
     constellationLevel: level,
@@ -36,16 +37,18 @@ export function createMavuikaDefinition(
           ? { buffs: mavuika.constellations.find((entry) => entry.level === 5)?.buffs }
           : {}),
     })),
-  };
+  });
 }
 
 export const mavuikaWithKit = createMavuikaDefinition();
 
 export const MAVUIKA_KIT_METADATA = {
   modelledPerks: ["c3BurstTalentLevel", "c5SkillTalentLevel"],
+  modelledUsage: ["fightingSpiritBurstCostAndThreshold", "tapHoldSkill"],
   c3BurstTalentLevels: MAVUIKA_C3_BURST_TALENT_LEVELS,
   c5SkillTalentLevels: MAVUIKA_C5_SKILL_TALENT_LEVELS,
   unsupportedChannels: [
+    "fightingSpiritDynamicGainTriggers",
     "a1NightsoulBurstTriggeredAtkAndDuration",
     "a4FightingSpiritBurstDamageBuffAndDecay",
     "c1NightsoulMaximumFightingSpiritEfficiencyAndAtkBuff",

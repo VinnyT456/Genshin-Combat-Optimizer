@@ -1,4 +1,4 @@
-import type { CooldownState } from "@/types";
+import type { AbilityChargeSnapshot, CooldownState } from "@/types";
 
 // ============================================================================
 // Cooldown tracking.
@@ -9,6 +9,7 @@ import type { CooldownState } from "@/types";
 // ============================================================================
 
 export type MutableCooldownState = Record<string, number>;
+export type MutableAbilityChargeState = Record<string, AbilityChargeSnapshot>;
 
 /** Timestamp at which `abilityId` becomes usable (0 == always was ready). */
 export function availableAt(
@@ -58,4 +59,90 @@ export function cloneCooldownState(
   cooldowns: CooldownState,
 ): MutableCooldownState {
   return { ...cooldowns };
+}
+
+/** Creates charge state for the abilities that explicitly declare charges. */
+export function createAbilityChargeState(
+  abilities: readonly { id: string; charges?: { maxCharges: number; initialCharges?: number } }[],
+): MutableAbilityChargeState {
+  const result: MutableAbilityChargeState = {};
+  for (const ability of abilities) {
+    const definition = ability.charges;
+    if (definition === undefined) continue;
+    const max = Math.max(1, Math.trunc(definition.maxCharges));
+    const initial = Math.min(
+      max,
+      Math.max(0, Math.trunc(definition.initialCharges ?? max)),
+    );
+    result[ability.id] = { current: initial, max, rechargeAt: [] };
+  }
+  return result;
+}
+
+/** Returns charge state after applying all recharges due at `time`. */
+export function abilityChargesAt(
+  state: AbilityChargeSnapshot,
+  time: number,
+): AbilityChargeSnapshot {
+  const pending = state.rechargeAt.filter((at) => at > time + 1e-9);
+  const recovered = state.rechargeAt.length - pending.length;
+  return {
+    current: Math.min(state.max, state.current + recovered),
+    max: state.max,
+    rechargeAt: pending,
+  };
+}
+
+/** Reads one ability's usage state without mutating the caller's state. */
+export function abilityChargeStateAt(
+  states: Readonly<Record<string, AbilityChargeSnapshot>> | undefined,
+  abilityId: string,
+  time: number,
+): AbilityChargeSnapshot | undefined {
+  const state = states?.[abilityId];
+  return state === undefined ? undefined : abilityChargesAt(state, time);
+}
+
+/** Consumes one charge and schedules its recharge at the resolved cooldown. */
+export function consumeAbilityCharge(
+  states: MutableAbilityChargeState,
+  abilityId: string,
+  time: number,
+  cooldownSeconds: number,
+): boolean {
+  const current = states[abilityId];
+  if (current === undefined) return true;
+  const ready = abilityChargesAt(current, time);
+  if (ready.current <= 0) return false;
+  states[abilityId] = {
+    current: ready.current - 1,
+    max: ready.max,
+    rechargeAt:
+      cooldownSeconds > 0
+        ? [...ready.rechargeAt, time + cooldownSeconds].sort((a, b) => a - b)
+        : ready.rechargeAt,
+  };
+  return true;
+}
+
+/** Resets all uses of one charged ability immediately. */
+export function resetAbilityCharges(
+  states: MutableAbilityChargeState,
+  abilityId: string,
+): void {
+  const current = states[abilityId];
+  if (current === undefined) return;
+  states[abilityId] = { ...current, current: current.max, rechargeAt: [] };
+}
+
+export function cloneAbilityChargeState(
+  states: Readonly<Record<string, AbilityChargeSnapshot>> | undefined,
+): MutableAbilityChargeState | undefined {
+  if (states === undefined) return undefined;
+  return Object.fromEntries(
+    Object.entries(states).map(([id, state]) => [id, {
+      ...state,
+      rechargeAt: [...state.rechargeAt],
+    }]),
+  );
 }

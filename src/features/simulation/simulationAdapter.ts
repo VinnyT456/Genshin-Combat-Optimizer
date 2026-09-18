@@ -24,7 +24,7 @@ import { createSethosDefinition } from "@/game-data/characters/kits/sethosDefini
 import { createShenheDefinition } from "@/game-data/characters/kits/shenheDefinition";
 import { createShikanoinHeizouDefinition } from "@/game-data/characters/kits/shikanoinHeizouDefinition";
 import { createSigewinneDefinition } from "@/game-data/characters/kits/sigewinneDefinition";
-import { createSkirkDefinition } from "@/game-data/characters/kits/skirkDefinition";
+import { createSkirkDefinition, type SkirkPartyComposition } from "@/game-data/characters/kits/skirkDefinition";
 import { createSucroseDefinition } from "@/game-data/characters/kits/sucroseDefinition";
 import { createTartagliaDefinition } from "@/game-data/characters/kits/tartagliaDefinition";
 import { createThomaDefinition } from "@/game-data/characters/kits/thomaDefinition";
@@ -56,12 +56,13 @@ import { createXinyanDefinition } from "@/game-data/characters/kits/xinyanDefini
 import { createYaeMikoDefinition } from "@/game-data/characters/kits/yaeMikoDefinition";
 import { createYanfeiDefinition } from "@/game-data/characters/kits/yanfeiDefinition";
 import { createYaoyaoDefinition } from "@/game-data/characters/kits/yaoyaoDefinition";
-import { createYelanDefinition } from "@/game-data/characters/kits/yelanDefinition";
+import { createYelanDefinition, type YelanPartyComposition } from "@/game-data/characters/kits/yelanDefinition";
 import { createYoimiyaDefinition } from "@/game-data/characters/kits/yoimiyaDefinition";
 import { createYumemizukiMizukiDefinition } from "@/game-data/characters/kits/yumemizukiMizukiDefinition";
 import { createYunJinDefinition } from "@/game-data/characters/kits/yunJinDefinition";
 import { createZhongliDefinition } from "@/game-data/characters/kits/zhongliDefinition";
 import { createZibaiDefinition } from "@/game-data/characters/kits/zibaiDefinition";
+import { withSkillInputVariants } from "@/game-data/characters/skillInputVariants";
 import { createAlhaithamDefinition } from "@/game-data/characters/kits/alhaithamDefinition";
 import { createAmberDefinition } from "@/game-data/characters/kits/amberDefinition";
 import { createAlyoshaDefinition } from "@/game-data/characters/kits/alyoshaDefinition";
@@ -86,7 +87,7 @@ import { createDilucDefinition } from "@/game-data/characters/kits/dilucDefiniti
 import { createDahliaDefinition } from "@/game-data/characters/kits/dahliaDefinition";
 import { createDionaDefinition } from "@/game-data/characters/kits/dionaDefinition";
 import { createDoriDefinition } from "@/game-data/characters/kits/doriDefinition";
-import { createEscoffierDefinition } from "@/game-data/characters/kits/escoffierDefinition";
+import { createEscoffierDefinition, type EscoffierPartyComposition } from "@/game-data/characters/kits/escoffierDefinition";
 import { createDurinDefinition } from "@/game-data/characters/kits/durinDefinition";
 import { createEmilieDefinition } from "@/game-data/characters/kits/emilieDefinition";
 import { createEulaDefinition } from "@/game-data/characters/kits/eulaDefinition";
@@ -159,7 +160,10 @@ import type { GenericCharacterDefinition } from "@/simulation/character/characte
 // ---------------------------------------------------------------------------
 
 /** Crit is presented as an expected value; the UI shows no random rolls. */
-const UI_SIMULATION_CONFIG: SimulationConfig = { critMode: "expected" };
+const UI_SIMULATION_CONFIG: SimulationConfig = {
+  critMode: "expected",
+  startWithFullEnergy: true,
+};
 
 /**
  * True when the run used the engine's own swap cost rather than a UI override.
@@ -234,9 +238,40 @@ export function isWebsiteCharacter(
   return "engineDefinition" in character;
 }
 
+export interface EngineTeamComposition {
+  readonly skirk?: SkirkPartyComposition;
+  readonly escoffier?: EscoffierPartyComposition;
+  readonly yelan?: YelanPartyComposition;
+}
+
+/** Derives the team-wide inputs consumed by supported character overlays. */
+export function engineCompositionForTeam(
+  team: readonly (
+    | CharacterDefinition
+    | GenericCharacterDefinition
+    | WebsiteCharacterDefinition
+  )[],
+): EngineTeamComposition {
+  const elements = team.map((character) =>
+    isWebsiteCharacter(character) ? character.engineDefinition.element : character.element,
+  );
+  return {
+    skirk: {
+      allHydroCryo: elements.every((element) => element === "hydro" || element === "cryo"),
+      hasHydro: elements.includes("hydro"),
+      hasCryo: elements.includes("cryo"),
+    },
+    escoffier: {
+      hydroOrCryoCount: elements.filter((element) => element === "hydro" || element === "cryo").length,
+    },
+    yelan: { distinctElementCount: new Set(elements).size },
+  };
+}
+
 /** Applies the editable website build to its lossless engine definition. */
 export function toEngineCharacter(
   character: CharacterDefinition | GenericCharacterDefinition | WebsiteCharacterDefinition,
+  composition: EngineTeamComposition = {},
 ): CharacterDefinition | GenericCharacterDefinition {
   if (!isWebsiteCharacter(character)) {
     if (!('normalAttacks' in character) && character.id === "chevreuse") {
@@ -398,6 +433,7 @@ export function toEngineCharacter(
         character.constellation ?? 0,
         character.talentLevels ?? { normal: 1, skill: 1, burst: 1 },
         { level: character.level, baseStats: character.baseStats },
+        composition.escoffier,
       );
       return {
         ...adapted,
@@ -1211,6 +1247,7 @@ export function toEngineCharacter(
         character.constellation ?? 0,
         character.talentLevels ?? { normal: 1, skill: 1, burst: 1 },
         { level: character.level, baseStats: character.baseStats },
+        composition.yelan,
       );
       return {
         ...adapted,
@@ -1415,6 +1452,7 @@ export function toEngineCharacter(
         character.constellation ?? 0,
         character.talentLevels ?? { normal: 1, skill: 1, burst: 1 },
         { level: character.level, baseStats: character.baseStats },
+        composition.skirk,
       );
       return {
         ...adapted,
@@ -1815,6 +1853,8 @@ export function toEngineCharacter(
         ? createEscoffierDefinition(
             selectedConstellation,
             character.talentLevels ?? character.engineDefinition.talentLevels,
+            {},
+            composition.escoffier,
           )
       : character.id === "durin"
         ? createDurinDefinition(
@@ -2175,6 +2215,8 @@ export function toEngineCharacter(
       ? createSkirkDefinition(
           selectedConstellation,
           character.talentLevels ?? character.engineDefinition.talentLevels,
+          {},
+          composition.skirk,
         )
       : character.id === "sucrose"
       ? createSucroseDefinition(
@@ -2260,6 +2302,8 @@ export function toEngineCharacter(
       ? createYelanDefinition(
           selectedConstellation,
           character.talentLevels ?? character.engineDefinition.talentLevels,
+          {},
+          composition.yelan,
         )
       : character.id === "yoimiya"
       ? createYoimiyaDefinition(
@@ -2369,8 +2413,9 @@ export function toEngineCharacter(
             character.talentLevels ?? character.engineDefinition.talentLevels,
           )
       : character.engineDefinition;
+  const definitionWithSkillVariants = withSkillInputVariants(baseDefinition);
   return {
-    ...baseDefinition,
+    ...definitionWithSkillVariants,
     level: character.level,
     baseStats: character.baseStats,
     constellationLevel: selectedConstellation,
@@ -2431,7 +2476,8 @@ export function runSimulation({
       )
     : {};
 
-  const engineTeam = team.map(toEngineCharacter);
+  const composition = engineCompositionForTeam(team);
+  const engineTeam = team.map((character) => toEngineCharacter(character, composition));
   const autoArtifactStateEffects = engineTeam.flatMap((character) => {
     if (!("normalAttacks" in character)) return [];
     if (character.id !== "raiden-shogun" && character.id !== "raiden") return [];

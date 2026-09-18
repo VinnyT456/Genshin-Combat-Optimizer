@@ -49,6 +49,18 @@ const REDHORN = "redhornstonethresher";
 /** Staff of Homa: unconditional HP + HP->ATK, plus a below-half-HP add-on. */
 const HOMA = "staffofhoma";
 const MISTSPLITTER = "mistsplitterreforged";
+const AZURELIGHT = "azurelight";
+const AQUA = "aquasimulacra";
+const SPLENDOR = "splendoroftranquilwaters";
+const SYMPHONIST = "symphonistofscents";
+const SPECIAL_SUPPORTED = new Set([
+  HOMA,
+  MISTSPLITTER,
+  AZURELIGHT,
+  AQUA,
+  SPLENDOR,
+  SYMPHONIST,
+]);
 
 const NORMAL_ROTATION: Rotation = [
   { characterId: testPyro.id, actionType: "normal" },
@@ -282,12 +294,186 @@ describe("Staff of Homa passive translation", () => {
   });
 });
 
+describe("signature weapon adapters", () => {
+  it("translates every owned refinement and lifecycle channel", () => {
+    for (const id of [AZURELIGHT, AQUA, SPLENDOR, SYMPHONIST]) {
+      const passive = weaponPassiveBuffsById(id);
+      expect(passive, `${id} must be translated`).toBeDefined();
+      expect(Object.keys(passive!.buffsByRefinement)).toHaveLength(5);
+      expect(Object.keys(passive!.stateEffectsByRefinement ?? {})).toHaveLength(
+        id === AQUA ? 0 : 5,
+      );
+    }
+
+    const azure = buffsForRefinement(
+      AZURELIGHT,
+      weaponFor(AZURELIGHT).passive!.name,
+      weaponFor(AZURELIGHT).passive!.refinements[0]!,
+    );
+    expect(azure).toHaveLength(2);
+    expect(azure[0]!.modifiers).toEqual([{ stat: "atkPercent", value: 0.24 }]);
+    expect(azure[1]!.modifiers).toEqual([
+      { stat: "atkPercent", value: 0.24 },
+      { stat: "critDmg", value: 0.4 },
+    ]);
+
+    const aqua = buffsForRefinement(
+      AQUA,
+      weaponFor(AQUA).passive!.name,
+      weaponFor(AQUA).passive!.refinements[0]!,
+    );
+    expect(aqua[0]!.modifiers).toEqual([
+      { stat: "hpPercent", value: 0.16 },
+      { stat: "dmgBonus", value: 0.2 },
+    ]);
+
+    const splendorEffects = weaponPassiveBuffsById(SPLENDOR)!.stateEffectsByRefinement![1]!;
+    expect(splendorEffects).toEqual([
+      expect.objectContaining({
+        resourceId: "weapon:splendor-skill-stacks",
+        eventTarget: "self",
+        maxStacks: 3,
+      }),
+      expect.objectContaining({
+        resourceId: "weapon:splendor-hp-stacks",
+        eventTarget: "otherPartyMember",
+        maxStacks: 2,
+      }),
+    ]);
+
+    const symphonist = buffsForRefinement(
+      SYMPHONIST,
+      weaponFor(SYMPHONIST).passive!.name,
+      weaponFor(SYMPHONIST).passive!.refinements[0]!,
+    );
+    expect(symphonist).toHaveLength(3);
+    expect(symphonist[2]!.targets).toEqual({ scope: "party" });
+    expect(symphonist[2]!.modifiers).toEqual([{ stat: "atkPercent", value: 0.32 }]);
+  });
+
+  it("applies Azurelight's R1 skill window and zero-energy bonus after Skill", () => {
+    const character = {
+      ...testPyro,
+      id: "azurelight-test-pyro",
+      elementalSkill: { ...testPyro.elementalSkill, energyGenerated: 0, particles: undefined },
+    };
+    const rotation: Rotation = [
+      { characterId: character.id, actionType: "skill" },
+      { characterId: character.id, actionType: "normal" },
+    ];
+    const bare = simulateRotation([character], rotation, testEnemy, { critMode: "never" });
+    const equipped = simulateRotation([character], rotation, testEnemy, {
+      critMode: "never",
+      equipmentBuffs: {
+        [character.id]: {
+          refinement: 1,
+          weaponPassive: weaponPassiveBuffsById(AZURELIGHT)!,
+        },
+      },
+    });
+    const normalDamage = (result: ReturnType<typeof simulateRotation>) =>
+      result.timeline.find((event) => event.type === "damage" && event.damage?.damageType === "normal")?.damage?.finalDamage ?? 0;
+    expect(normalDamage(equipped) / normalDamage(bare)).toBeCloseTo(1.48, 8);
+    expect(equipped.finalState.characters[character.id]?.resources?.["weapon:azurelight-skill-window"]?.value).toBe(1);
+  });
+
+  it("applies Aqua Simulacra's R1 nearby-opponent damage bonus", () => {
+    const equipped = simulateRotation([testPyro], NORMAL_ROTATION, testEnemy, {
+      critMode: "never",
+      equipmentBuffs: {
+        [testPyro.id]: {
+          refinement: 1,
+          weaponPassive: weaponPassiveBuffsById(AQUA)!,
+        },
+      },
+    });
+    const bare = simulateRotation([testPyro], NORMAL_ROTATION, testEnemy, { critMode: "never" });
+    expect(equipped.totalDamage / bare.totalDamage).toBeCloseTo(1.2, 8);
+  });
+
+  it("starts Splendor's R1 self-HP stack from the wearer's HP change", () => {
+    const character = { ...testPyro, id: "splendor-test-pyro" };
+    const config: SimulationConfig = {
+      critMode: "never",
+      resourceEvents: [{
+        timestamp: 0,
+        sourceCharacterId: character.id,
+        targetCharacterId: character.id,
+        resourceId: "damageTaken",
+        kind: "consume",
+        amount: 1000,
+      }],
+      equipmentBuffs: {
+        [character.id]: {
+          refinement: 1,
+          weaponPassive: weaponPassiveBuffsById(SPLENDOR)!,
+        },
+      },
+    };
+    const result = simulateRotation(
+      [character],
+      [{ characterId: character.id, actionType: "skill" }],
+      testEnemy,
+      config,
+    );
+    expect(result.totalDamage).toBeGreaterThan(0);
+    expect(result.finalState.characters[character.id]?.resources?.["weapon:splendor-skill-stacks"]?.value).toBe(1);
+    const bare = simulateRotation(
+      [character],
+      [{ characterId: character.id, actionType: "skill" }],
+      testEnemy,
+      { critMode: "never" },
+    );
+    expect(result.totalDamage / bare.totalDamage).toBeCloseTo(
+      (1 + 0.466 + 0.08) / (1 + 0.466),
+      8,
+    );
+  });
+
+  it("starts Symphonist's R1 Sweet Echoes after the wearer initiates healing", () => {
+    const character = { ...testPyro, id: "symphonist-test-pyro" };
+    const result = simulateRotation(
+      [character],
+      [
+        { characterId: character.id, actionType: "skill" },
+        { characterId: character.id, actionType: "normal" },
+      ],
+      testEnemy,
+      {
+        critMode: "never",
+        resourceEvents: [{
+          timestamp: 0,
+          sourceCharacterId: character.id,
+          targetCharacterId: character.id,
+          resourceId: "damageTaken",
+          kind: "consume",
+          amount: 1000,
+        }],
+        healingEvents: [{
+          timestamp: 1,
+          sourceCharacterId: character.id,
+          targetCharacterId: character.id,
+          amount: 1000,
+        }],
+        equipmentBuffs: {
+          [character.id]: {
+            refinement: 1,
+            weaponPassive: weaponPassiveBuffsById(SYMPHONIST)!,
+          },
+        },
+      },
+    );
+    expect(result.finalState.characters[character.id]?.resources?.["weapon:symphonist-sweet-echoes"]?.value).toBe(1);
+    expect(result.timeline.some((event) => event.type === "healing")).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // FAIL CLOSED — bucketing and refinement
 // ---------------------------------------------------------------------------
 
-describe("only the expressible bucket becomes a Buff", () => {
-  it("no non-expressible row anywhere yields a buff except Homa's translated rows", () => {
+describe("only the expressible bucket or a verified adapter becomes a Buff", () => {
+  it("no non-expressible row anywhere yields a buff except verified adapters", () => {
     let expressible = 0;
     let skipped = 0;
     for (const [id, weapon] of generatedWeaponsById) {
@@ -297,7 +483,7 @@ describe("only the expressible bucket becomes a Buff", () => {
           expressible += 1;
         } else {
           skipped += 1;
-          if (id !== HOMA && id !== MISTSPLITTER) {
+          if (!SPECIAL_SUPPORTED.has(id)) {
             // An always-on approximation of a conditional passive overstates it.
             expect(buffs).toEqual([]);
           }
@@ -311,13 +497,17 @@ describe("only the expressible bucket becomes a Buff", () => {
     expect(skipped).toBeGreaterThan(0);
   });
 
-  it("exactly the six always-on weapons plus Homa feed buffs into the engine", () => {
+  it("only translated weapon passives feed buffs into the engine", () => {
     expect([...weaponPassiveBuffsByWeaponId.keys()].sort()).toEqual([
+      AQUA,
+      AZURELIGHT,
       "festeringdesire",
       MISTSPLITTER,
       "redhornstonethresher",
       "rust",
+      SPLENDOR,
       HOMA,
+      SYMPHONIST,
       "thecatch",
       "thestringless",
       "whitetassel",
@@ -445,7 +635,7 @@ describe("only the expressible bucket becomes a Buff", () => {
       const expressible = (weapon.passive?.refinements ?? []).some(
         (row) => row.bucket === "expressible",
       );
-      if (!expressible && weapon.id !== HOMA && weapon.id !== MISTSPLITTER) {
+      if (!expressible && !SPECIAL_SUPPORTED.has(weapon.id)) {
         expect(weaponPassiveBuffs(weapon)).toBeUndefined();
       }
     }
@@ -460,7 +650,7 @@ describe("refinement fails closed", () => {
   });
 
   it("a partly-expressible passive omits the levels that are not", () => {
-    // NO GENERATED WEAPON IS THIS SHAPE TODAY: all six expressible passives are
+    // NO GENERATED WEAPON IS THIS SHAPE TODAY: all expressible passives are
     // expressible at all five refinements. The rule must still hold when one
     // appears, and the only way to prove it now is a hand-built row -- so this
     // is a SYNTHETIC weapon, not game data, and it is the one place in this
@@ -511,8 +701,7 @@ describe("refinement fails closed", () => {
         );
         const present = passive.buffsByRefinement[level] !== undefined;
         expect(present, `${id} R${level}`).toBe(
-          id === HOMA ||
-            id === MISTSPLITTER ||
+          SPECIAL_SUPPORTED.has(id) ||
             (row?.bucket === "expressible" &&
               buffsForRefinement(id, "", row).length > 0),
         );
@@ -572,16 +761,20 @@ describe("the adapter is deterministic", () => {
     expect(buffs[0]!.modifiers).toHaveLength(2);
   });
 
-  it("weapon passive buffs are permanent and worn by the wearer only", () => {
+  it("weapon passive buffs start deterministically and keep their authored target scope", () => {
     for (const [, passive] of weaponPassiveBuffsByWeaponId) {
       for (const buffs of Object.values(passive.buffsByRefinement)) {
         for (const buff of buffs ?? []) {
-          expect(buff.duration).toBe(Number.POSITIVE_INFINITY);
           expect(buff.startTime).toBe(0);
           expect(buff.stacking).toEqual({ mode: "refresh" });
-          // NOT `party`: a weapon buffs its wearer, including while that
-          // character is off field for snapshot or coordinated damage.
-          expect(buff.targets.scope).toBe("self");
+          // Ordinary weapon buffs belong to the wearer. Symphonist's
+          // healing-triggered party channel is the explicit exception.
+          expect(["self", "party"]).toContain(buff.targets.scope);
+          if (buff.targets.scope === "self") {
+            expect(buff.sourceCharacterId).toBeUndefined();
+          } else {
+            expect(buff.id).toContain("sweet-echoes");
+          }
         }
       }
     }

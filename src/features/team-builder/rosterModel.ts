@@ -1,6 +1,7 @@
 import type { CharacterDefinition, Element } from "@/types";
 import type { SemanticState } from "@/components/ui/tokens";
 import type { Rarity, WeaponType } from "@/simulation/character/kit";
+import type { GenericCharacterDefinition } from "@/simulation/character/character";
 import {
   findCharacter,
   releaseDateOf,
@@ -9,6 +10,8 @@ import {
 } from "@/game-data/characters/registry";
 import type { WebsiteCharacterDefinition } from "@/features/simulation/simulationAdapter";
 import { charNameZh, elementZh, weaponZh } from "@/lib/i18n";
+import { withSkillInputVariants } from "@/game-data/characters/skillInputVariants";
+import { createSkirkDefinition } from "@/game-data/characters/kits/skirkDefinition";
 
 // ---------------------------------------------------------------------------
 // Pure character roster and facet filtering model for TeamBuilder and
@@ -20,14 +23,40 @@ export type ElementFilter = "all" | Element;
 export type WeaponFilter = "all" | WeaponType;
 export type RarityFilter = "all" | Rarity;
 
+function engineDefinitionFor(character: PlayableCharacter): GenericCharacterDefinition {
+  // Skirk's generated rows describe the sourced talents, but her executable
+  // kit has two distinct Skill inputs and a stance-dependent Burst. Keep that
+  // runtime overlay beside the sequence editor so its tap/hold buttons match
+  // the definition the simulator will execute.
+  return character.id === "skirk"
+    ? createSkirkDefinition(character.constellationLevel, character.talentLevels)
+    : withSkillInputVariants(character);
+}
+
 /** Keeps the complete generated kit beside the legacy fields used by the UI. */
 export function toWebsiteCharacter(
   character: PlayableCharacter,
 ): WebsiteCharacterDefinition {
   return {
     ...toLegacyCharacterDefinition(character),
-    engineDefinition: character,
+    engineDefinition: engineDefinitionFor(character),
   };
+}
+
+/**
+ * Keeps imported level/stats while attaching the lossless kit used by the
+ * sequence editor. Enka starts with the legacy presentation shape because its
+ * values are account-specific; replacing that shape with generated data would
+ * discard the imported build. The simulation adapter still applies the
+ * imported constellation/talents when it creates the runtime definition.
+ */
+export function attachEngineDefinition(
+  character: CharacterDefinition,
+): CharacterDefinition | WebsiteCharacterDefinition {
+  const source = findCharacter(character.id);
+  return source === undefined
+    ? character
+    : { ...character, engineDefinition: engineDefinitionFor(source) };
 }
 
 export interface ElementOption {

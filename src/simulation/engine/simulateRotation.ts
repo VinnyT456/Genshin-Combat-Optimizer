@@ -40,7 +40,14 @@ import {
   normalStringIndexOf,
   resolveNormalStringIndex,
 } from "@/simulation/engine/actionSpace";
-import { cloneCooldownState, resetCooldowns, startCooldown } from "@/simulation/cooldowns";
+import {
+  cloneAbilityChargeState,
+  cloneCooldownState,
+  consumeAbilityCharge,
+  createAbilityChargeState,
+  resetCooldowns,
+  startCooldown,
+} from "@/simulation/cooldowns";
 import {
   cloneEnergyState,
   createEnergyState,
@@ -48,15 +55,22 @@ import {
   gainEnergyWithModifier,
   spendEnergy,
 } from "@/simulation/energy";
+import { allAbilities } from "@/simulation/character/character";
 import type { GenericCharacterDefinition } from "@/simulation/character/character";
 import { liftAbility, liftCharacter } from "@/simulation/character/adapter";
-import { cooldownFor, planAbility } from "@/simulation/character/execution";
+import { cooldownFor, planAbility, talentLevelFor } from "@/simulation/character/execution";
+import { talentValueAt } from "@/simulation/character/talent";
 import type { PlannedHit } from "@/simulation/character/execution";
 import type {
   KitAbility,
   NormalAttackString,
   ResourceScalingTerm,
+  HealingDefinition,
+  HealthChangeDefinition,
+  PartyHpDamageBonus,
+  ResourceTransferDefinition,
 } from "@/simulation/character/kit";
+import { energyCostOf } from "@/simulation/character/kit";
 import {
   applyStateEffect,
   applyStateEffects,
@@ -81,10 +95,12 @@ import type {
 } from "@/simulation/engine/reactionTicks";
 import { restoreFromSnapshot } from "@/simulation/engine/resume";
 import { resolveTalentLevelBoosts } from "@/simulation/engine/talentLevelSeam";
-import { withPerkBuffs } from "@/simulation/engine/perkBuffs";
+import { harvestTeamPerkBuffs } from "@/simulation/engine/perkBuffs";
 import { withEquipmentBuffs } from "@/simulation/engine/equipmentBuffs";
 import { harvestTeamResonanceBuffs } from "@/simulation/engine/teamResonance";
 import { withHarvestedBuffs } from "@/simulation/engine/composeResolvers";
+import { harvestTeamEquipmentBuffs } from "@/simulation/engine/equipmentBuffs";
+import { makeBuffResolver } from "@/simulation/buffs/makeBuffResolver";
 import type { Buff } from "@/simulation/buffs/types";
 import type { TransformativeInstance } from "@/simulation/reactions/resolver";
 import { resolveInfusedElement } from "@/simulation/reactions/infusions";
@@ -139,7 +155,7 @@ function materializeResourceScaling(
   state: CharacterState,
   castTime: number,
   castResourceSnapshots?: Readonly<Record<string, number>>,
-): PlannedHit {
+): PlannedHit | undefined {
   const terms = hit.resourceScaling;
   if (terms === undefined || terms.length === 0) return hit;
 
@@ -148,16 +164,27 @@ function materializeResourceScaling(
     const snapshotValue =
       term.snapshot === "cast"
         ? stance?.resourceSnapshots?.[term.resourceId] ?? castResourceSnapshots?.[term.resourceId]
+        : term.snapshot === "action"
+          ? castResourceSnapshots?.[term.resourceId]
         : undefined;
     const resource = state.resources?.[term.resourceId];
     const value =
       snapshotValue ??
       resourceValueAt(resource, term.snapshot === "cast" ? castTime : hit.timestamp);
-    if (!Number.isFinite(value) || !Number.isFinite(term.multiplierPerStack) || value === 0) {
+    const stacks = Math.min(
+      term.maxStacks ?? Number.POSITIVE_INFINITY,
+      Math.max(0, value - (term.threshold ?? 0)),
+    );
+    if (!Number.isFinite(stacks) || !Number.isFinite(term.multiplierPerStack) || stacks === 0) {
       return [];
     }
-    return [{ stat: term.stat, multiplier: term.multiplierPerStack * value }];
+    return [{ stat: term.stat, multiplier: term.multiplierPerStack * stacks }];
   });
+
+  // A pure resource-scaled instance is a conditional hit, not a zero-damage
+  // event. For example, Skirk's C1 crystal blade is not summoned when no
+  // Void Rift was absorbed by the cast.
+  if (additions.length === 0 && hit.scaling.length === 0) return undefined;
 
   return {
     ...hit,
@@ -190,6 +217,7 @@ export interface ActiveTriggerEntry {
 
 function initCharacterState(
   inputDef: CharacterDefinition | GenericCharacterDefinition,
+  startWithFullEnergy = false,
 ): CharacterState {
   const isGeneric = "normalAttacks" in inputDef;
   const genericDef: GenericCharacterDefinition = isGeneric
@@ -260,14 +288,19 @@ function initCharacterState(
       }
     : inputDef;
 
-  const energy = createEnergyState(legacyDef);
+  const energy = createEnergyState(legacyDef, startWithFullEnergy);
   return {
     definition: legacyDef,
     genericDefinition: genericDef,
     energy,
     cooldowns: {},
     normalStringIndex: FIRST_NORMAL_STRING_INDEX,
-    resources: createResourceStates(genericDef.resources, 0),
+    resources: createResourceStates(
+      genericDef.resources,
+      0,
+      startWithFullEnergy,
+    ),
+    abilityCharges: createAbilityChargeState(allAbilities(genericDef)),
     icd: {},
     activeStance: undefined,
   };
@@ -281,6 +314,9 @@ function snapshotCharacter(state: CharacterState): CharacterSnapshot {
     ...(state.currentHp !== undefined ? { currentHp: state.currentHp } : {}),
     ...(state.shielded !== undefined ? { shielded: state.shielded } : {}),
     cooldowns: cloneCooldownState(state.cooldowns),
+    ...(state.abilityCharges !== undefined && Object.keys(state.abilityCharges).length > 0
+      ? { abilityCharges: cloneAbilityChargeState(state.abilityCharges) }
+      : {}),
     normalStringIndex: normalStringIndexOf(state),
     icd: state.icd ? { ...state.icd } : undefined,
     resources: state.resources ? { ...state.resources } : undefined,
@@ -442,6 +478,9 @@ function applyStanceStats(
     result = {
       ...result,
       elementalDmgBonus: { ...result.elementalDmgBonus },
+      ...(result.baseDmgMultiplier !== undefined
+        ? { baseDmgMultiplier: { ...result.baseDmgMultiplier } }
+        : {}),
     };
     for (const mod of stance.modifiers) {
       switch (mod.stat) {
@@ -480,6 +519,14 @@ function applyStanceStats(
           break;
         case "flatDamageBonus":
           result.flatDamageBonus = (result.flatDamageBonus ?? 0) + mod.value;
+          break;
+        case "baseDmgMultiplier":
+          if (mod.damageType !== undefined) {
+            result.baseDmgMultiplier = {
+              ...(result.baseDmgMultiplier ?? {}),
+              [mod.damageType]: (result.baseDmgMultiplier?.[mod.damageType] ?? 1) + mod.value,
+            };
+          }
           break;
         case "elementalDmgBonus":
           if (mod.element !== undefined) {
@@ -522,10 +569,68 @@ function evaluateTriggers(
     ability: KitAbility,
     emission: ParticleEmission,
   ) => void,
+  onDamageDealt?: (
+    sourceCharacterId: string,
+    timestamp: number,
+    element: CharacterDefinition["element"],
+  ) => void,
+  onReaction?: (
+    sourceCharacterId: string,
+    timestamp: number,
+    reactionKinds: readonly string[],
+  ) => void,
+  onHealthChange?: (
+    change: HealthChangeDefinition,
+    sourceCharacterId: string,
+    timestamp: number,
+  ) => void,
+  partyHpDamageBonus?: (bonus: PartyHpDamageBonus | undefined) => number,
+  eventSourceCharacterId?: string,
+  eventAbilityId?: string,
+  eventDamageType?: DamageType,
+  eventElement?: CharacterDefinition["element"],
+  onTriggeredHealing?: (
+    healing: HealingDefinition,
+    sourceCharacterId: string,
+    timestamp: number,
+  ) => void,
+  excludedTriggerIds?: ReadonlySet<string>,
 ): number {
   let totalDamage = 0;
   for (const entry of activeTriggers) {
     if (entry.trigger.trigger !== triggerType) continue;
+    if (excludedTriggerIds?.has(entry.trigger.id)) continue;
+    const sourceState = states.get(entry.trigger.sourceCharacterId);
+    if (!sourceState) continue;
+    if (
+      entry.trigger.eventSourceCharacterId !== undefined &&
+      entry.trigger.eventSourceCharacterId !== eventSourceCharacterId
+    ) continue;
+    if (
+      entry.trigger.excludeEventSourceCharacterId &&
+      eventSourceCharacterId === entry.trigger.sourceCharacterId
+    ) continue;
+    if (
+      entry.trigger.eventSourceMustBeActive &&
+      eventSourceCharacterId !== activeCharacterId
+    ) continue;
+    if (
+      entry.trigger.eventAbilityIds !== undefined &&
+      (eventAbilityId === undefined || !entry.trigger.eventAbilityIds.includes(eventAbilityId))
+    ) continue;
+    if (
+      entry.trigger.eventDamageTypes !== undefined &&
+      (eventDamageType === undefined || !entry.trigger.eventDamageTypes.includes(eventDamageType))
+    ) continue;
+    if (
+      entry.trigger.eventElements !== undefined &&
+      (eventElement === undefined || !entry.trigger.eventElements.includes(eventElement))
+    ) continue;
+    if (entry.trigger.requiredResourceMinimum !== undefined) {
+      const required = entry.trigger.requiredResourceMinimum;
+      const value = resourceValueAt(sourceState.resources?.[required.resourceId], currentTime);
+      if (value < required.amount) continue;
+    }
     if (
       !isTriggerEffectActive(
         entry.trigger,
@@ -560,13 +665,80 @@ function evaluateTriggers(
       entry.nextProcTime = currentTime + entry.trigger.intervalSeconds;
     }
 
-    const procAbility = entry.trigger.ability;
-    if (!procAbility) continue;
-
-    const sourceState = states.get(entry.trigger.sourceCharacterId);
-    if (!sourceState) continue;
     const sourceGeneric = sourceState.genericDefinition as GenericCharacterDefinition;
     const sourceDef = sourceState.definition;
+
+    if (entry.trigger.stateEffects && entry.trigger.stateEffects.length > 0) {
+      sourceState.resources = applyStateEffects(
+        sourceState.resources ?? {},
+        entry.trigger.stateEffects,
+        currentTime,
+      );
+      for (const effect of entry.trigger.stateEffects) {
+        const value = sourceState.resources[effect.resourceId]?.value;
+        timeline.push(resourceEventRecord({
+          timestamp: currentTime,
+          sourceCharacterId: sourceDef.id,
+          resourceId: effect.resourceId,
+          kind: effect.kind,
+          amount: effect.amount,
+          ...(value !== undefined ? { value } : {}),
+        }));
+      }
+    }
+
+    const generatedEnergy = (entry.trigger.energyGenerated ?? 0) +
+      (entry.trigger.energyGeneratedBySourceStat === undefined
+        ? 0
+        : Math.max(0, characterStatsFor(sourceDef.id, sourceDef.baseStats, config).critRate) *
+          entry.trigger.energyGeneratedBySourceStat.ratio);
+    if (generatedEnergy > 0 && Number.isFinite(generatedEnergy)) {
+      const applied = gainEnergyWithModifier(
+        sourceState.energy,
+        generatedEnergy,
+        config.energyGainModifier,
+      );
+      if (applied > 0) {
+        timeline.push({
+          timestamp: currentTime,
+          type: "energy",
+          characterId: sourceDef.id,
+          description: `${sourceDef.name} gains ${applied.toFixed(2)} energy from ${entry.trigger.name}`,
+          energy: sourceState.energy.current,
+          energyByCharacter: Object.fromEntries(
+            [...states.entries()].map(([id, state]) => [id, state.energy.current]),
+          ),
+        });
+      }
+    }
+
+    for (const healing of entry.trigger.healing ?? []) {
+      onTriggeredHealing?.(healing, sourceDef.id, currentTime);
+    }
+    for (const change of entry.trigger.hpChangesBeforeHit ?? []) {
+      onHealthChange?.(change, sourceDef.id, currentTime);
+    }
+
+    const procAbility = entry.trigger.ability;
+    if (!procAbility) {
+      for (const effect of entry.trigger.stateEffectsAfterAbility ?? []) {
+        sourceState.resources = applyStateEffects(
+          sourceState.resources ?? {},
+          [effect],
+          currentTime,
+        );
+        const value = sourceState.resources[effect.resourceId]?.value;
+        timeline.push(resourceEventRecord({
+          timestamp: currentTime,
+          sourceCharacterId: sourceDef.id,
+          resourceId: effect.resourceId,
+          kind: effect.kind,
+          amount: effect.amount,
+          ...(value !== undefined ? { value } : {}),
+        }));
+      }
+      continue;
+    }
 
     sourceState.icd = sourceState.icd ?? {};
     const procHits = planAbility({
@@ -578,11 +750,48 @@ function evaluateTriggers(
 
     for (const plannedHit of procHits) {
       const hit = materializeResourceScaling(plannedHit, sourceState, currentTime);
+      if (hit === undefined) continue;
+      for (const change of hit.hpChangesBeforeHit ?? []) {
+        onHealthChange?.(change, sourceDef.id, hit.timestamp);
+      }
       const effectiveElement = resolveInfusedElement(
         hit.element,
         hit.damageType,
         activeInfusions,
         hit.timestamp,
+      );
+
+      // A coordinated hit is still a real damage event. Re-run only the
+      // consume-before-hit layer so effects such as Escoffier's Cold Dish can
+      // empower the coordinated hit itself. The currently executing trigger
+      // is excluded to prevent a self-recursive declaration from looping.
+      const nestedExcludedTriggerIds = new Set(excludedTriggerIds ?? []);
+      nestedExcludedTriggerIds.add(entry.trigger.id);
+      totalDamage += evaluateTriggers(
+        "onDamageDealtBeforeHit",
+        hit.timestamp,
+        activeTriggers,
+        states,
+        activeInfusions,
+        castSnapshot,
+        enemy,
+        config,
+        timeline,
+        enemyAuras,
+        tickQueue,
+        runtimeBuffs,
+        activeCharacterId,
+        onParticleEmission,
+        onDamageDealt,
+        onReaction,
+        onHealthChange,
+        partyHpDamageBonus,
+        sourceDef.id,
+        hit.abilityId,
+        hit.damageType,
+        effectiveElement,
+        onTriggeredHealing,
+        nestedExcludedTriggerIds,
       );
 
       const buffContext: BuffContext = {
@@ -661,12 +870,15 @@ function evaluateTriggers(
         characterLevel: sourceDef.level,
         enemy,
         config,
+        additionalDmgBonus: partyHpDamageBonus?.(hit.partyHpDamageBonus) ?? 0,
         enemyModifiers,
         reaction: {
           additiveBaseDamageBonus: reaction.additiveBaseDamageBonus,
           amplifyingMultiplier: reaction.amplifyingMultiplier,
         },
       });
+
+      onReaction?.(sourceDef.id, hit.timestamp, reaction.reactionKinds ?? []);
 
       timeline.push({
         timestamp: hit.timestamp,
@@ -675,6 +887,7 @@ function evaluateTriggers(
         description: `${sourceDef.name} ${hit.abilityName}`,
         damage,
       });
+      onDamageDealt?.(sourceDef.id, hit.timestamp, effectiveElement);
 
       emitTransformative(
         timeline,
@@ -702,6 +915,22 @@ function evaluateTriggers(
         stats,
         enemyModifiers,
       );
+    }
+    for (const effect of entry.trigger.stateEffectsAfterAbility ?? []) {
+      sourceState.resources = applyStateEffects(
+        sourceState.resources ?? {},
+        [effect],
+        currentTime,
+      );
+      const value = sourceState.resources[effect.resourceId]?.value;
+      timeline.push(resourceEventRecord({
+        timestamp: currentTime,
+        sourceCharacterId: sourceDef.id,
+        resourceId: effect.resourceId,
+        kind: effect.kind,
+        amount: effect.amount,
+        ...(value !== undefined ? { value } : {}),
+      }));
     }
     for (const buff of entry.trigger.buffs ?? []) {
       runtimeBuffs.push(
@@ -886,10 +1115,14 @@ export function simulateRotation(
   // R1-by-default) and a set's buffs are gated on its actual PIECE COUNT, so a
   // 4pc bonus is absent at 3 pieces. Composed, not chained-over: perk buffs,
   // equipment buffs and any caller-supplied resolver all coexist.
+  // Harvest the team's static perk list once per run. The same list is needed
+  // both for the live resolver and for the max-HP gate below; collecting it a
+  // second time was pure overhead on every optimizer candidate.
+  const teamPerkBuffs = harvestTeamPerkBuffs(team);
   const config: SimulationConfig = withHarvestedBuffs(
     withEquipmentBuffs(
       team.map((def) => def.id),
-      withPerkBuffs(team, inputConfig),
+      withHarvestedBuffs(inputConfig, teamPerkBuffs),
     ),
     harvestTeamResonanceBuffs(team),
   );
@@ -924,7 +1157,7 @@ export function simulateRotation(
 
   const states = new Map<string, CharacterState>();
   for (const def of team) {
-    const state = initCharacterState(def);
+    const state = initCharacterState(def, config.startWithFullEnergy === true);
     // Start combat at full HP with no shield. This gives HP/shield-gated
     // artifact effects a real, deterministic initial state while preserving
     // optional scenario overrides through `resumeFrom`.
@@ -1113,6 +1346,81 @@ export function simulateRotation(
   const runtimeConfig = (): SimulationConfig =>
     runtimeBuffs.length > 0 ? withHarvestedBuffs(config, runtimeBuffs) : config;
 
+  // HP state only needs a mechanics pass when the team actually owns a buff
+  // that can change HP. Keeping this resolver separate from the caller's
+  // damage resolver avoids extra public resolver calls during every HP-ratio
+  // read and keeps snapshot-per-cast instrumentation truthful.
+  const staticMaxHpBuffs: readonly Buff[] = [
+    ...teamPerkBuffs,
+    ...harvestTeamEquipmentBuffs(team.map((def) => def.id), config.equipmentBuffs),
+  ];
+  const affectsMaxHp = (buff: Buff): boolean =>
+    buff.modifiers?.some((modifier) => modifier.stat === "hpPercent" || modifier.stat === "hpFlat") === true ||
+    buff.resourceModifiers?.some((modifier) => modifier.targetStat === "hpPercent" || modifier.targetStat === "hpFlat") === true ||
+    buff.conversions?.some((conversion) => conversion.targetStat === "hpPercent" || conversion.targetStat === "hpFlat") === true;
+  let cachedRuntimeBuffCount = -1;
+  let cachedMaxHpResolver: ReturnType<typeof makeBuffResolver> | undefined;
+  function maxHpResolver(): ReturnType<typeof makeBuffResolver> | undefined {
+    if (runtimeBuffs.length === cachedRuntimeBuffCount) return cachedMaxHpResolver;
+    cachedRuntimeBuffCount = runtimeBuffs.length;
+    const buffs = [...staticMaxHpBuffs, ...runtimeBuffs].filter(affectsMaxHp);
+    cachedMaxHpResolver = buffs.length > 0 ? makeBuffResolver({ buffs }) : undefined;
+    return cachedMaxHpResolver;
+  }
+
+  /**
+   * Keep runtime HP state aligned with the same resolved stats used to price a
+   * hit. Max HP can change after the run starts (for example Yelan C4 marks or
+   * Furina C2 excess Fanfare). Leaving CharacterState.maxHp at its initial
+   * value makes every percentage HP drain, HP threshold, Fanfare conversion,
+   * and healing cap use a different character sheet than damage does.
+   *
+   * This deliberately updates only the ceiling. A Max HP increase does not
+   * heal the character, while a decrease can never leave current HP above the
+   * new ceiling. The resolver remains the single owner of stat composition.
+   */
+  function refreshCharacterMaxHp(state: CharacterState, timestamp: number): void {
+    const resolver = maxHpResolver();
+    if (resolver === undefined) return;
+    const context: BuffContext = {
+      time: timestamp,
+      character: state.definition,
+      // HP modifiers in the supported kits are ability-independent. Using the
+      // legacy Skill shape gives the shared resolver a complete ability
+      // discriminator while avoiding a made-up damage event.
+      ability: state.definition.elementalSkill,
+      activeCharacterId,
+      snapshot: snapshot(
+        states,
+        timestamp,
+        activeCharacterId,
+        activeTriggers,
+        activeInfusions,
+        tickQueue,
+        enemyAuras,
+        scheduledArtifactEvents,
+        normalizedHealingEvents,
+        runtimeBuffs,
+        artifactTriggerState(),
+      ),
+      enemy: enemyAtHit(),
+    };
+    const resolved = resolveStats(
+      characterStatsFor(state.definition.id, state.definition.baseStats, config),
+      context,
+      resolver,
+    );
+    if (!(resolved.hp > 0) || !Number.isFinite(resolved.hp)) return;
+    state.maxHp = resolved.hp;
+    if (state.currentHp !== undefined) {
+      state.currentHp = Math.min(state.currentHp, resolved.hp);
+    }
+  }
+
+  function refreshPartyMaxHp(timestamp: number): void {
+    for (const member of party) refreshCharacterMaxHp(member, timestamp);
+  }
+
   /** Resolve time-driven field procs that elapsed before the next action. */
   function processIntervalTriggers(until: number): void {
     for (const entry of activeTriggers) {
@@ -1140,7 +1448,7 @@ export function simulateRotation(
             enemyAuras,
           ),
           enemy,
-          config,
+          runtimeConfig(),
           timeline,
           enemyAuras,
           tickQueue,
@@ -1148,6 +1456,13 @@ export function simulateRotation(
           activeCharacterId,
           (sourceCharacterId, timestamp, ability) =>
             processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
+          (sourceCharacterId, timestamp, element) =>
+            triggerDamageResourceGains(sourceCharacterId, timestamp, element),
+          (sourceCharacterId, timestamp, reactionKinds) =>
+            triggerReactionResourceGains(sourceCharacterId, timestamp, reactionKinds),
+          (change, sourceCharacterId, timestamp) =>
+            applyHealthChange(change, sourceCharacterId, timestamp),
+          (bonus) => partyHpBonusForHit(bonus),
         ));
         // Expired or capped entries are removed below; make sure malformed
         // declarations cannot trap this loop at one timestamp.
@@ -1158,6 +1473,7 @@ export function simulateRotation(
       entry.nextProcTime = nextProcTime;
     }
   }
+  const nextStanceResourceDrain = new Map<string, number>();
   const endStance = (state: CharacterState, timestamp: number): void => {
     const stance = getTypedStance(state);
     if (!stance) return;
@@ -1181,7 +1497,123 @@ export function simulateRotation(
         activeTriggers.splice(index, 1);
       }
     }
+    const drain = stance.stance.resourceDrain;
+    if (drain !== undefined) {
+      nextStanceResourceDrain.delete(`${state.definition.id}:${drain.resourceId}`);
+    }
+    for (const resourceId of stance.stance.resetResourcesOnEnd ?? []) {
+      const current = state.resources?.[resourceId];
+      const value = current === undefined ? 0 : resourceValueAt(current, timestamp);
+      if (current === undefined || value <= EPSILON) continue;
+      const next = applyStateEffect(
+        current,
+        { resourceId, kind: "set", amount: 0 },
+        timestamp,
+      );
+      state.resources = { ...(state.resources ?? {}), [resourceId]: next };
+      timeline.push(resourceEventRecord({
+        timestamp,
+        sourceCharacterId: state.definition.id,
+        resourceId,
+        kind: "consume",
+        amount: value,
+        value: next.value,
+      }));
+    }
     state.activeStance = undefined;
+  };
+  function processStanceResourceDrains(until: number): void {
+    if (!Number.isFinite(until) && until !== Number.POSITIVE_INFINITY) return;
+    for (const state of states.values()) {
+      const active = getTypedStance(state);
+      const drain = active?.stance.resourceDrain;
+      if (
+        active === undefined ||
+        drain === undefined ||
+        !(drain.amountPerSecond > 0) ||
+        !Number.isFinite(drain.amountPerSecond) ||
+        !(drain.intervalSeconds > 0) ||
+        !Number.isFinite(drain.intervalSeconds)
+      ) continue;
+      const key = `${state.definition.id}:${drain.resourceId}`;
+      let next = nextStanceResourceDrain.get(key);
+      if (next === undefined) {
+        next = resumedFromTime === undefined
+          ? active.startTime + drain.intervalSeconds
+          : until + drain.intervalSeconds;
+      }
+      const stanceEnd = active.startTime + active.stance.durationSeconds;
+      while (next < stanceEnd - EPSILON && next <= until + EPSILON) {
+        const current = state.resources?.[drain.resourceId];
+        const before = current === undefined ? 0 : resourceValueAt(current, next);
+        const amount = drain.amountPerSecond * drain.intervalSeconds;
+        if (current !== undefined && before > 0) {
+          const updated = applyStateEffect(
+            current,
+            { resourceId: drain.resourceId, kind: "consume", amount },
+            next,
+          );
+          state.resources = { ...(state.resources ?? {}), [drain.resourceId]: updated };
+          timeline.push(resourceEventRecord({
+            timestamp: next,
+            sourceCharacterId: state.definition.id,
+            resourceId: drain.resourceId,
+            kind: "consume",
+            amount: before - updated.value,
+            value: updated.value,
+          }));
+          if (drain.endWhenDepleted && updated.value <= EPSILON) {
+            endStance(state, next);
+            break;
+          }
+        }
+        next += drain.intervalSeconds;
+      }
+      if (getTypedStance(state) !== undefined) nextStanceResourceDrain.set(key, next);
+    }
+  }
+  const consumeReplacementResource = (
+    state: CharacterState,
+    ability: KitAbility,
+    actionType: ActionType,
+    timestamp: number,
+  ): void => {
+    if (actionType !== "normal") return;
+    const stance = getTypedStance(state);
+    const costs = stance === undefined
+      ? []
+      : [
+          ...(stance.stance.replacementResourceCost === undefined
+            ? []
+            : [stance.stance.replacementResourceCost]),
+          ...(stance.stance.replacementResourceCosts ?? []),
+          ...(stance.stance.postActionResourceCosts ?? []),
+        ];
+    if (!stance || costs.length === 0 || !stance.stance.normalAttacks) return;
+    if (!stance.stance.normalAttacks.hits.some((entry) => entry.id === ability.id)) return;
+    for (const cost of costs) {
+      const current = state.resources?.[cost.resourceId];
+      if (!current) continue;
+      const available = resourceValueAt(current, timestamp);
+      const next = applyStateEffect(
+        current,
+        { resourceId: cost.resourceId, kind: "consume", amount: cost.amount },
+        timestamp,
+      );
+      state.resources = { ...(state.resources ?? {}), [cost.resourceId]: next };
+      timeline.push(resourceEventRecord({
+        timestamp,
+        sourceCharacterId: state.definition.id,
+        resourceId: cost.resourceId,
+        kind: "consume",
+        amount: Math.min(available, cost.amount),
+        value: next.value,
+      }));
+      if (cost.endWhenDepleted && resourceValueAt(next, timestamp) <= EPSILON) {
+        endStance(state, timestamp);
+        break;
+      }
+    }
   };
   const lastArtifactTrigger = new Map<string, number>();
   const artifactTriggerCounts = new Map<string, number>();
@@ -1207,10 +1639,33 @@ export function simulateRotation(
     element?: CharacterDefinition["element"],
     eventResourceId?: string,
     actionType?: ActionType,
+    eventTargetCharacterId?: string,
+    eventSourceCharacterId?: string,
   ): void {
     for (const effect of artifactStateEffects) {
-      if (effect.kind !== "resourceOnTrigger" || effect.trigger !== trigger ||
-          effect.sourceCharacterId !== sourceCharacterId) continue;
+      if (effect.kind !== "resourceOnTrigger" || effect.trigger !== trigger) continue;
+      if (effect.trigger === "resourceEvent") {
+        const eventTargetId = eventTargetCharacterId ?? sourceCharacterId;
+        if (
+          effect.eventTarget === "self" &&
+          eventTargetId !== effect.sourceCharacterId
+        ) continue;
+        if (
+          effect.eventTarget === "otherPartyMember" &&
+          eventTargetId === effect.sourceCharacterId
+        ) continue;
+        if (
+          effect.eventSource === "owner" &&
+          (eventSourceCharacterId ?? sourceCharacterId) !== effect.sourceCharacterId
+        ) continue;
+        if (
+          effect.eventTarget === undefined &&
+          effect.eventSource === undefined &&
+          effect.sourceCharacterId !== sourceCharacterId
+        ) continue;
+      } else if (effect.sourceCharacterId !== sourceCharacterId) {
+        continue;
+      }
       if (
         effect.actionTypes !== undefined &&
         (actionType === undefined || !effect.actionTypes.includes(actionType))
@@ -1237,7 +1692,7 @@ export function simulateRotation(
       ) continue;
       if (effect.trigger === "resourceEvent" && effect.eventResourceId === undefined) continue;
       const key = `${effect.kind}:${effect.sourceCharacterId}:${effect.resourceId}`;
-      const state = states.get(sourceCharacterId);
+      const state = states.get(effect.sourceCharacterId);
       if (!state || !Number.isFinite(effect.value) || effect.maxStacks <= 0) continue;
       const energyCost = effect.trigger === "skillCast"
         ? Math.max(0, effect.consumeEnergy ?? 0)
@@ -1281,7 +1736,7 @@ export function simulateRotation(
       lastArtifactTrigger.set(key, timestamp);
       timeline.push(resourceEventRecord({
         timestamp,
-        sourceCharacterId,
+        sourceCharacterId: effect.sourceCharacterId,
         resourceId: effect.resourceId,
         kind: effect.stackMode === "add" ? "gain" : "set",
         amount: gain,
@@ -1410,9 +1865,183 @@ export function simulateRotation(
     }
   }
 
+  function triggerHpChangeResourceGains(
+    sourceCharacterId: string,
+    targetCharacterId: string,
+    amount: number,
+    timestamp: number,
+  ): void {
+    if (!(amount > 0) || !Number.isFinite(amount)) return;
+    const target = states.get(targetCharacterId);
+    if (target) refreshCharacterMaxHp(target, timestamp);
+    const maxHp = target?.maxHp ?? 0;
+    if (!(maxHp > 0)) return;
+    for (const owner of party) {
+      const generic = owner.genericDefinition as GenericCharacterDefinition;
+      for (const definition of generic.resources) {
+        const rule = definition.gainOnHpChange;
+        if (rule === undefined) continue;
+        if (
+          rule.requiredResourceId !== undefined &&
+          resourceValueAt(owner.resources?.[rule.requiredResourceId], timestamp) <
+            (rule.requiredResourceMinimum ?? 1)
+        ) continue;
+        const gain = (amount / maxHp) * rule.pointsPerHpFraction;
+        if (!(gain > 0) || !Number.isFinite(gain)) continue;
+        const current = owner.resources?.[definition.id];
+        if (current === undefined) continue;
+        const currentValue = resourceValueAt(current, timestamp);
+        const overflow = Math.max(0, currentValue + gain - current.max);
+        const next = applyStateEffect(
+          current,
+          { resourceId: definition.id, kind: "gain", amount: gain },
+          timestamp,
+        );
+        owner.resources = { ...(owner.resources ?? {}), [definition.id]: next };
+        timeline.push(resourceEventRecord({
+          timestamp,
+          sourceCharacterId,
+          targetCharacterId: owner.definition.id,
+          resourceId: definition.id,
+          kind: "gain",
+          amount: gain,
+          value: next.value,
+        }));
+        if (overflow > EPSILON && rule.overflowResourceId !== undefined) {
+          const overflowState = owner.resources?.[rule.overflowResourceId];
+          if (overflowState !== undefined) {
+            const overflowNext = applyStateEffect(
+              overflowState,
+              { resourceId: rule.overflowResourceId, kind: "gain", amount: overflow },
+              timestamp,
+            );
+            owner.resources = {
+              ...(owner.resources ?? {}),
+              [rule.overflowResourceId]: overflowNext,
+            };
+            timeline.push(resourceEventRecord({
+              timestamp,
+              sourceCharacterId,
+              targetCharacterId: owner.definition.id,
+              resourceId: rule.overflowResourceId,
+              kind: "gain",
+              amount: overflow,
+              value: overflowNext.value,
+            }));
+          }
+        }
+      }
+    }
+    // HP-change resources can themselves alter Max HP (Yelan C4 and Furina
+    // C2). Refresh every recipient after the resource transition so the next
+    // event sees the new ceiling.
+    refreshPartyMaxHp(timestamp);
+  }
+
+  const lastDamageResourceGain = new Map<string, number>();
+  const damageResourceSources = new Map<string, Map<string, number>>();
+  function triggerDamageResourceGains(
+    sourceCharacterId: string,
+    timestamp: number,
+    element: CharacterDefinition["element"],
+  ): void {
+    for (const owner of party) {
+      const generic = owner.genericDefinition as GenericCharacterDefinition;
+      for (const definition of generic.resources) {
+        const rule = definition.gainOnDamageDealt;
+        if (rule === undefined || !rule.elements.includes(element)) continue;
+        if (rule.excludeOwner && owner.definition.id === sourceCharacterId) continue;
+        const key = `${owner.definition.id}:${definition.id}`;
+        const last = lastDamageResourceGain.get(key) ?? -Infinity;
+        if (timestamp - last < Math.max(0, rule.cooldownSeconds)) continue;
+        if (rule.oncePerSource) {
+          const sources = damageResourceSources.get(key);
+          const sourceLast = sources?.get(sourceCharacterId);
+          const duration = definition.durationSeconds ?? Number.POSITIVE_INFINITY;
+          if (sourceLast !== undefined && timestamp - sourceLast < duration) continue;
+        }
+        const current = owner.resources?.[definition.id];
+        if (current === undefined || !(rule.amount > 0)) continue;
+        const next = applyStateEffect(
+          current,
+          { resourceId: definition.id, kind: "gain", amount: rule.amount },
+          timestamp,
+        );
+        owner.resources = { ...(owner.resources ?? {}), [definition.id]: next };
+        lastDamageResourceGain.set(key, timestamp);
+        if (rule.oncePerSource) {
+          const sources = damageResourceSources.get(key) ?? new Map<string, number>();
+          sources.set(sourceCharacterId, timestamp);
+          damageResourceSources.set(key, sources);
+        }
+        timeline.push(resourceEventRecord({
+          timestamp,
+          sourceCharacterId,
+          targetCharacterId: owner.definition.id,
+          resourceId: definition.id,
+          kind: "gain",
+          amount: rule.amount,
+          value: next.value,
+        }));
+      }
+    }
+  }
+
+  const lastReactionResourceGain = new Map<string, number>();
+  function triggerReactionResourceGains(
+    sourceCharacterId: string,
+    timestamp: number,
+    reactionKinds: readonly string[],
+  ): void {
+    if (reactionKinds.length === 0) return;
+    for (const owner of party) {
+      const generic = owner.genericDefinition as GenericCharacterDefinition;
+      for (const definition of generic.resources) {
+        const rule = definition.gainOnReaction;
+        if (rule === undefined || !reactionKinds.some((kind) => rule.reactions.some((reaction) => reaction === kind))) continue;
+        if (rule.excludeOwner && owner.definition.id === sourceCharacterId) continue;
+        const key = `${owner.definition.id}:${definition.id}`;
+        const last = lastReactionResourceGain.get(key) ?? -Infinity;
+        if (timestamp - last < Math.max(0, rule.cooldownSeconds)) continue;
+        const current = owner.resources?.[definition.id];
+        if (current === undefined || !(rule.amount > 0)) continue;
+        const next = applyStateEffect(
+          current,
+          { resourceId: definition.id, kind: "gain", amount: rule.amount },
+          timestamp,
+        );
+        owner.resources = { ...(owner.resources ?? {}), [definition.id]: next };
+        lastReactionResourceGain.set(key, timestamp);
+        timeline.push(resourceEventRecord({
+          timestamp,
+          sourceCharacterId,
+          targetCharacterId: owner.definition.id,
+          resourceId: definition.id,
+          kind: "gain",
+          amount: next.value - resourceValueAt(current, timestamp),
+          value: next.value,
+        }));
+      }
+    }
+  }
+
   function pushHealingEvent(event: HealingEvent): void {
+    if (event.targetScope === "party") {
+      for (const recipient of party) {
+        pushHealingEvent({
+          ...event,
+          targetScope: "source",
+          targetCharacterId: recipient.definition.id,
+        });
+      }
+      return;
+    }
     const safeAmount = Math.max(0, Number.isFinite(event.amount) ? event.amount : 0);
-    const targetCharacterId = event.targetCharacterId ?? event.sourceCharacterId;
+    const targetCharacterId = event.targetCharacterId ??
+      (event.targetScope === "active" ? activeCharacterId : undefined) ??
+      event.sourceCharacterId;
+    const target = states.get(targetCharacterId);
+    if (target) refreshCharacterMaxHp(target, event.timestamp);
     const normalized: HealingEvent = {
       ...event,
       targetCharacterId,
@@ -1425,10 +2054,18 @@ export function simulateRotation(
     normalizedHealingEvents.sort((a, b) => a.timestamp - b.timestamp);
     const record = applyHealingEvent(states, normalized);
     if (record) timeline.push(record);
+    const restored = record?.healing?.amount ?? 0;
+    triggerHpChangeResourceGains(
+      normalized.sourceCharacterId,
+      targetCharacterId,
+      restored,
+      normalized.timestamp,
+    );
     // HP-changing events feed artifact lifecycles such as Marechaussee Hunter.
     // The event id is deliberately generic: callers that model HP loss can
     // emit the same `hpChange` ResourceEvent, while ordinary healing remains
     // deterministic and requires no hidden damage assumptions.
+    if (restored > 0) {
       triggerArtifactResources(
         "resourceEvent",
         normalized.targetCharacterId ?? normalized.sourceCharacterId,
@@ -1436,11 +2073,202 @@ export function simulateRotation(
         undefined,
         undefined,
         "hpChange",
+        undefined,
+        normalized.targetCharacterId,
+        normalized.sourceCharacterId,
       );
+    }
+  }
+
+  function resolveHealingAmount(
+    healing: HealingDefinition,
+    sourceStats: Stats,
+    talentLevel: number,
+  ): number {
+    const scaled = healing.scaling.reduce((total, term) => {
+      const multiplier = talentValueAt(term.table, talentLevel);
+      const value = sourceStats[term.stat];
+      return total + (Number.isFinite(multiplier) && Number.isFinite(value)
+        ? multiplier * value
+        : 0);
+    }, 0);
+    const flat = healing.flat === undefined ? 0 : talentValueAt(healing.flat, talentLevel);
+    const baseAmount = scaled + (Number.isFinite(flat) ? flat : 0);
+    const bonusMultiplier = healing.bonusMultiplierFromStat === undefined
+      ? 0
+      : Math.max(0, sourceStats[healing.bonusMultiplierFromStat.stat]) *
+        healing.bonusMultiplierFromStat.ratio;
+    return Math.max(0, baseAmount * (1 + bonusMultiplier));
+  }
+
+  function scheduleAbilityHealing(
+    ability: KitAbility,
+    source: CharacterState,
+    timestamp: number,
+    talentLevelBoosts: Parameters<typeof cooldownFor>[2],
+    context: BuffContext,
+  ): void {
+    if (ability.healing === undefined || ability.healing.length === 0) return;
+    const generic = source.genericDefinition as GenericCharacterDefinition;
+    const sourceStats = resolveStats(
+      characterStatsFor(source.definition.id, source.definition.baseStats, config),
+      context,
+      runtimeConfig().buffResolver,
+    );
+    for (const healing of ability.healing) {
+      const amount = resolveHealingAmount(
+        healing,
+        sourceStats,
+        talentLevelFor(generic, ability, talentLevelBoosts),
+      );
+      if (!(amount > 0)) continue;
+      const delay = Math.max(0, healing.delay ?? 0);
+      const baseInterval = healing.intervalSeconds;
+      const duration = Math.max(0, healing.durationSeconds ?? 0);
+      const intervalReduction = healing.intervalReductionFromStat;
+      const interval = baseInterval !== undefined && intervalReduction !== undefined
+        ? baseInterval * (1 - Math.min(
+            intervalReduction.maxReduction,
+            Math.max(0, Math.floor(
+              sourceStats[intervalReduction.stat] / intervalReduction.unitValue,
+            ) * intervalReduction.ratio),
+          ))
+        : baseInterval;
+      const count = interval !== undefined && interval > 0 && duration > 0
+        ? Math.floor(duration / interval + 1e-9)
+        : 1;
+      for (let index = 0; index < count; index++) {
+        const at = timestamp + delay + (count === 1 ? 0 : (index + 1) * interval!);
+        scheduledArtifactEvents.push({
+          timestamp: at,
+          kind: "healing",
+          event: {
+            timestamp: at,
+            sourceCharacterId: source.definition.id,
+            targetScope: healing.target === "self" ? "source" : healing.target,
+            amount,
+          },
+        });
+      }
+    }
+  }
+
+  function scheduleTriggeredHealing(
+    healing: HealingDefinition,
+    sourceCharacterId: string,
+    timestamp: number,
+  ): void {
+    const source = states.get(sourceCharacterId);
+    if (!source) return;
+    const triggerAbility: KitAbility = {
+      id: `${sourceCharacterId}-${healing.id}-trigger`,
+      name: healing.name,
+      slot: "skill",
+      castTime: 0,
+      cooldown: { values: [0] },
+      energyCost: 0,
+      instances: [],
+      healing: [healing],
+    };
+    const context: BuffContext = {
+      time: timestamp,
+      character: source.definition,
+      ability: source.definition.elementalSkill,
+      activeCharacterId,
+      snapshot: snapshot(
+        states,
+        timestamp,
+        activeCharacterId,
+        activeTriggers,
+        activeInfusions,
+        tickQueue,
+        enemyAuras,
+        undefined,
+        normalizedHealingEvents,
+        runtimeBuffs,
+        artifactTriggerState(),
+      ),
+      enemy: enemyAtHit(),
+    };
+    scheduleAbilityHealing(triggerAbility, source, timestamp, {}, context);
+  }
+
+  function applyHealthChange(
+    change: HealthChangeDefinition,
+    sourceCharacterId: string,
+    timestamp: number,
+  ): void {
+    const source = states.get(sourceCharacterId);
+    if (!source) return;
+    const targets = change.target === "party"
+      ? party
+      : [change.target === "active" ? states.get(activeCharacterId ?? "") : source].filter(
+          (target): target is CharacterState => target !== undefined,
+        );
+    for (const target of targets) {
+      refreshCharacterMaxHp(target, timestamp);
+      const maxHp = target.maxHp ?? 0;
+      const currentHp = target.currentHp ?? maxHp;
+      if (!(maxHp > 0)) continue;
+      if (
+        change.onlyIfHpFractionAbove !== undefined &&
+        currentHp / maxHp <= change.onlyIfHpFractionAbove
+      ) continue;
+      const amount = Math.max(
+        0,
+        change.amount ?? maxHp * Math.max(0, change.maxHpFraction ?? 0),
+      );
+      if (!(amount > 0)) continue;
+      if (change.kind === "damage") {
+        const lost = Math.min(amount, currentHp);
+        target.currentHp = Math.max(0, currentHp - amount);
+        triggerHpChangeResourceGains(sourceCharacterId, target.definition.id, lost, timestamp);
+        if (lost > 0) {
+          timeline.push(resourceEventRecord({
+            timestamp,
+            sourceCharacterId,
+            targetCharacterId: target.definition.id,
+            resourceId: "hpChange",
+            kind: "consume",
+            amount: lost,
+            value: target.currentHp,
+          }));
+          triggerArtifactResources(
+            "resourceEvent",
+            target.definition.id,
+            timestamp,
+            undefined,
+            undefined,
+            "hpChange",
+            undefined,
+            target.definition.id,
+            sourceCharacterId,
+          );
+        }
+      } else {
+        pushHealingEvent({
+          timestamp,
+          sourceCharacterId,
+          targetCharacterId: target.definition.id,
+          amount,
+        });
+      }
+    }
+  }
+
+  function partyHpBonusForHit(bonus: PartyHpDamageBonus | undefined): number {
+    if (bonus === undefined) return 0;
+    const count = party.reduce((total, member) => {
+      const maxHp = member.maxHp ?? 0;
+      const currentHp = member.currentHp ?? maxHp;
+      return total + (maxHp > 0 && currentHp / maxHp >= bonus.minHpFraction ? 1 : 0);
+    }, 0);
+    return bonus.bonusByCount[Math.min(count, bonus.bonusByCount.length - 1)] ?? 0;
   }
 
   function scheduleHealing(effect: Extract<ArtifactStateEffect, { kind: "healOnPickup" }>, event: PickupEvent): void {
     const owner = states.get(effect.sourceCharacterId);
+    if (owner) refreshCharacterMaxHp(owner, event.timestamp);
     const maxHp = owner?.maxHp ?? 0;
     const total = effect.amount ?? (maxHp * (effect.maxHpFraction ?? 0));
     const duration = Math.max(0, effect.durationSeconds ?? 0);
@@ -1511,6 +2339,7 @@ export function simulateRotation(
       if (event.resourceId === "damageTaken" || event.resourceId === "hpDecrease") {
         const targetId = event.targetCharacterId ?? event.sourceCharacterId;
         const target = states.get(targetId);
+        if (target) refreshCharacterMaxHp(target, event.timestamp);
         const amount = Math.max(0, Number.isFinite(event.amount ?? 0) ? event.amount ?? 0 : 0);
         if (target && amount > 0 && target.currentHp !== undefined) {
           target.currentHp = Math.max(0, target.currentHp - amount);
@@ -1526,6 +2355,9 @@ export function simulateRotation(
             undefined,
             undefined,
             "hpChange",
+            undefined,
+            targetId,
+            event.sourceCharacterId,
           );
         }
       }
@@ -1600,6 +2432,7 @@ export function simulateRotation(
         }
       } else if (effect.kind === "healOnBurst") {
         const owner = states.get(sourceCharacterId);
+        if (owner) refreshCharacterMaxHp(owner, timestamp);
         const amount = (owner?.maxHp ?? 0) * Math.max(0, effect.maxHpFraction);
         if (amount > 0) pushHealingEvent({ timestamp, sourceCharacterId, amount });
       }
@@ -1619,7 +2452,8 @@ export function simulateRotation(
     ability: KitAbility,
     timestamp: number,
   ): void {
-    if (ability.slot !== "burst" || ability.energyCost <= 0) return;
+    const energyCost = energyCostOf(ability);
+    if (ability.slot !== "burst" || energyCost <= 0) return;
 
     for (const recipient of party) {
       const generic = recipient.genericDefinition as GenericCharacterDefinition;
@@ -1631,7 +2465,7 @@ export function simulateRotation(
           rule.multipliersByElement?.[source.definition.element] ??
           rule.defaultMultiplier ??
           1;
-        const amount = ability.energyCost * rule.perEnergyCost * multiplier;
+        const amount = energyCost * rule.perEnergyCost * multiplier;
         if (!(amount > 0) || !Number.isFinite(amount)) continue;
         const current = recipient.resources?.[definition.id];
         if (current === undefined) continue;
@@ -1669,6 +2503,12 @@ export function simulateRotation(
     const generic = source.genericDefinition as GenericCharacterDefinition;
     for (const definition of generic.resources) {
       if (!definition.consumeOnBurstCast) continue;
+      // A resource cost is consumed through the explicit ability-cost
+      // channel below. This guard keeps legacy definitions that still use
+      // consumeOnBurstCast compatible without double-spending new profiles.
+      if (ability.cost?.resources?.some((cost) => cost.resourceId === definition.id)) {
+        continue;
+      }
       const current = source.resources?.[definition.id];
       const value = resourceValueAt(current, timestamp);
       if (current === undefined || value <= 0) continue;
@@ -1691,6 +2531,103 @@ export function simulateRotation(
           value: next.value,
         }),
       );
+    }
+  }
+
+  /** Consume explicit ability resource costs after cast snapshots are taken. */
+  function consumeAbilityResources(
+    source: CharacterState,
+    ability: KitAbility,
+    timestamp: number,
+  ): void {
+    for (const cost of ability.cost?.resources ?? []) {
+      const current = source.resources?.[cost.resourceId];
+      const value = resourceValueAt(current, timestamp);
+      if (current === undefined || value < cost.amount - EPSILON) continue;
+      const next = applyStateEffect(
+        current,
+        cost.consume === "all"
+          ? { resourceId: cost.resourceId, kind: "set", amount: 0 }
+          : { resourceId: cost.resourceId, kind: "consume", amount: cost.amount },
+        timestamp,
+      );
+      source.resources = {
+        ...(source.resources ?? {}),
+        [cost.resourceId]: next,
+      };
+      timeline.push(
+        resourceEventRecord({
+          timestamp,
+          sourceCharacterId: source.definition.id,
+          resourceId: cost.resourceId,
+          kind: "consume",
+          amount: value - next.value,
+          value: next.value,
+        }),
+      );
+    }
+  }
+
+  function applyResourceTransfers(
+    source: CharacterState,
+    transfers: readonly ResourceTransferDefinition[] | undefined,
+    timestamp: number,
+  ): void {
+    for (const transfer of transfers ?? []) {
+      if (
+        !(transfer.amountPerSourceUnit > 0) ||
+        !Number.isFinite(transfer.amountPerSourceUnit)
+      ) continue;
+      const sourceState = source.resources?.[transfer.sourceResourceId];
+      const targetState = source.resources?.[transfer.targetResourceId];
+      if (!sourceState || !targetState) continue;
+      const sourceValue = resourceValueAt(sourceState, timestamp);
+      const units = Math.min(
+        transfer.maxSourceUnits ?? Number.POSITIVE_INFINITY,
+        sourceValue,
+      );
+      if (!(units > 0) || !Number.isFinite(units)) continue;
+      const targetAmount = units * transfer.amountPerSourceUnit;
+      if (!(targetAmount > 0) || !Number.isFinite(targetAmount)) continue;
+      const targetValueBefore = resourceValueAt(targetState, timestamp);
+
+      let nextResources = source.resources ?? {};
+      if (transfer.consumeSource) {
+        const nextSource = applyStateEffect(
+          sourceState,
+          { resourceId: transfer.sourceResourceId, kind: "consume", amount: units },
+          timestamp,
+        );
+        nextResources = {
+          ...nextResources,
+          [transfer.sourceResourceId]: nextSource,
+        };
+        timeline.push(resourceEventRecord({
+          timestamp,
+          sourceCharacterId: source.definition.id,
+          resourceId: transfer.sourceResourceId,
+          kind: "consume",
+          amount: sourceValue - nextSource.value,
+          value: nextSource.value,
+        }));
+      }
+      const nextTarget = applyStateEffect(
+        targetState,
+        { resourceId: transfer.targetResourceId, kind: "gain", amount: targetAmount },
+        timestamp,
+      );
+      source.resources = {
+        ...nextResources,
+        [transfer.targetResourceId]: nextTarget,
+      };
+      timeline.push(resourceEventRecord({
+        timestamp,
+        sourceCharacterId: source.definition.id,
+        resourceId: transfer.targetResourceId,
+        kind: "gain",
+        amount: nextTarget.value - targetValueBefore,
+        value: nextTarget.value,
+      }));
     }
   }
 
@@ -1849,6 +2786,14 @@ export function simulateRotation(
     while (resourceIndex < resourceEvents.length && resourceEvents[resourceIndex]!.timestamp <= clock) resourceIndex += 1;
   }
 
+  // Resolve static and already-restored HP modifiers before the first external
+  // event. A cold start is full HP after those modifiers; a resumed run keeps
+  // its absolute current HP and only receives the new ceiling.
+  refreshPartyMaxHp(clock);
+  if (resumedFromTime === undefined) {
+    for (const member of party) member.currentHp = member.maxHp;
+  }
+
   // Process externally supplied events that occur before first action.
   processArtifactEvents(clock);
 
@@ -1856,6 +2801,7 @@ export function simulateRotation(
     const action = rotation[i]!;
 
     processArtifactEvents(clock);
+    processStanceResourceDrains(clock);
     processIntervalTriggers(clock);
 
     // CONTRACT 1: every tick due at or before `clock` resolves BEFORE anything
@@ -1941,6 +2887,11 @@ export function simulateRotation(
     // Casting puts the character on-field.
     activeCharacterId = def.id;
 
+    // Resource-backed HP modifiers from an earlier action (for example a
+    // Yelan C4 Lifeline mark) become part of the next action's character
+    // sheet before its costs, healing, or damage are resolved.
+    refreshPartyMaxHp(clock);
+
     // Check if current active stance expired before this action
     const currentStance = getTypedStance(state);
     if (
@@ -1961,17 +2912,22 @@ export function simulateRotation(
       triggerBurstArtifactEffects(def.id, clock);
     }
 
-    if (ability.energyCost > 0) {
-      spendEnergy(state.energy, ability.energyCost);
+    const energyCost = energyCostOf(ability);
+    if (energyCost > 0) {
+      spendEnergy(state.energy, energyCost);
       timeline.push({
         timestamp: clock,
         type: "energy",
         characterId: def.id,
-        description: `${def.name} spends ${ability.energyCost} energy on burst`,
+        description: `${def.name} spends ${energyCost} energy on burst`,
         energy: state.energy.current,
         energyByCharacter: energyByCharacter(states),
       });
     }
+
+    // Resource costs are explicit data. Capture/snapshot-dependent damage is
+    // evaluated from the pre-cost state, while the live state is reduced now.
+    consumeAbilityResources(state, ability, clock);
 
     // Apply declarative state effects to resources
     if (ability.effects && ability.effects.length > 0) {
@@ -1981,6 +2937,7 @@ export function simulateRotation(
         clock,
       );
     }
+    applyResourceTransfers(state, ability.resourceTransfers, clock);
 
     // Resolve-like resources gain from the burst event itself. This runs
     // after the cast's own declarative effects and before stance activation,
@@ -2016,6 +2973,11 @@ export function simulateRotation(
         }
       }
     }
+    if (ability.preHitBuffs) {
+      for (const buff of ability.preHitBuffs) {
+        runtimeBuffs.push(materializeRuntimeBuff(buff, state, config, clock));
+      }
+    }
     if (ability.infusion) {
       activeInfusions.push({
         infusion: ability.infusion,
@@ -2036,6 +2998,23 @@ export function simulateRotation(
       runtimeBuffs,
       artifactTriggerState(),
     );
+
+    // Skill-hit triggers must be present while the skill's own hit resolves:
+    // the hit is the event that creates them (for example Yelan C4), but the
+    // trigger itself still runs only after the damage has been priced below.
+    // Other cast-owned triggers keep the normal post-cast registration below.
+    for (const trig of ability.triggers ?? []) {
+      const triggerBelongsToThisCast =
+        trig.trigger === "onSkillHit" ||
+        (action.actionType === "burst" && trig.trigger === "onBurstCast");
+      if (!triggerBelongsToThisCast) continue;
+      activeTriggers.push({
+        trigger: trig,
+        startTime: clock,
+        procCount: 0,
+        ...(trig.snapshotMode === "cast" ? { snapshot: castSnapshot } : {}),
+      });
+    }
 
     // Stance triggers are registered before this snapshot exists. Bind only
     // cast-snapshot triggers created by this cast, leaving dynamic triggers
@@ -2067,7 +3046,7 @@ export function simulateRotation(
         activeInfusions,
         castSnapshot,
         enemy,
-        config,
+        runtimeConfig(),
         timeline,
         enemyAuras,
         tickQueue,
@@ -2075,6 +3054,15 @@ export function simulateRotation(
         activeCharacterId,
         (sourceCharacterId, timestamp, ability) =>
           processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
+        (sourceCharacterId, timestamp, element) =>
+          triggerDamageResourceGains(sourceCharacterId, timestamp, element),
+        (sourceCharacterId, timestamp, reactionKinds) =>
+          triggerReactionResourceGains(sourceCharacterId, timestamp, reactionKinds),
+        (change, sourceCharacterId, timestamp) =>
+          applyHealthChange(change, sourceCharacterId, timestamp),
+        (bonus) => partyHpBonusForHit(bonus),
+        def.id,
+        ability.id,
       ));
     }
 
@@ -2110,6 +3098,13 @@ export function simulateRotation(
       castBuffContext,
       config.talentLevelResolver,
     );
+    scheduleAbilityHealing(
+      ability,
+      state,
+      clock,
+      talentLevelBoosts,
+      castBuffContext,
+    );
 
     // Plan ability hits via execution model
     state.icd = state.icd ?? {};
@@ -2120,9 +3115,15 @@ export function simulateRotation(
       icd: state.icd,
       talentLevelBoosts,
     });
-    const materializedHits = hits.map((hit) =>
-      materializeResourceScaling(hit, state, clock, castResourceSnapshots),
-    );
+    const materializedHits = hits.flatMap((hit) => {
+      const materialized = materializeResourceScaling(
+        hit,
+        state,
+        clock,
+        castResourceSnapshots,
+      );
+      return materialized === undefined ? [] : [materialized];
+    });
 
     if (action.actionType === "burst") {
       consumeBurstResources(state, ability, clock);
@@ -2137,6 +3138,15 @@ export function simulateRotation(
       if (timeLimit !== undefined && hit.timestamp > timeLimit + EPSILON) {
         continue;
       }
+      for (const change of hit.hpChangesBeforeHit ?? []) {
+        applyHealthChange(change, def.id, hit.timestamp);
+      }
+      // Resource and HP-gated dynamic effects read the live state. Snapshot
+      // buffs still use the cast timestamp, while their state view remains
+      // current for resource/party-health channels.
+      castSnapshot.characters = Object.fromEntries(
+        [...states.entries()].map(([id, current]) => [id, snapshotCharacter(current)]),
+      );
       // Delayed hits are events on the same canonical clock. Drain pending
       // reaction work before a hit at that timestamp, including equal-time
       // boundaries. This prevents a delayed hit from jumping over an EC tick.
@@ -2165,6 +3175,39 @@ export function simulateRotation(
           ? effectiveStance.stance.damageTypeOverride ?? hit.damageType
           : hit.damageType;
 
+      // Some effects consume a limited charge immediately before a qualifying
+      // hit (for example Escoffier's Cold Dish). This event is deliberately
+      // separate from the historical post-hit damage trigger so the consumed
+      // resource is visible to the damage resolver for the hit itself.
+      applyEnemyDamage(evaluateTriggers(
+        "onDamageDealtBeforeHit",
+        hit.timestamp,
+        activeTriggers,
+        states,
+        activeInfusions,
+        castSnapshot,
+        hitEnemy,
+        runtimeConfig(),
+        timeline,
+        enemyAuras,
+        tickQueue,
+        runtimeBuffs,
+        activeCharacterId,
+        (sourceCharacterId, timestamp, ability) =>
+          processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
+        (sourceCharacterId, timestamp, element) =>
+          triggerDamageResourceGains(sourceCharacterId, timestamp, element),
+        (sourceCharacterId, timestamp, reactionKinds) =>
+          triggerReactionResourceGains(sourceCharacterId, timestamp, reactionKinds),
+        (change, sourceCharacterId, timestamp) =>
+          applyHealthChange(change, sourceCharacterId, timestamp),
+        (bonus) => partyHpBonusForHit(bonus),
+        def.id,
+        ability.id,
+        effectiveDamageType,
+        effectiveElement,
+      ));
+
       // Aura-gated artifact effects (Blizzard Strayer, Lavawalker,
       // Thundersoother, etc.) must read the aura as it exists for THIS hit.
       // Keep the cast snapshot object itself stable (snapshot semantics and
@@ -2186,9 +3229,7 @@ export function simulateRotation(
           scaling: "atk",
           castTime: 0,
           cooldown: 0,
-          energyCost: effectiveDamageType === "burst"
-            ? def.elementalBurst.energyCost
-            : ability.energyCost,
+          energyCost: energyCostOf(ability),
           energyGenerated: 0,
         },
         activeCharacterId,
@@ -2249,12 +3290,19 @@ export function simulateRotation(
         ...(healingFlatBonus > 0
           ? { flatDamageBonus: (stats.flatDamageBonus ?? 0) + healingFlatBonus }
           : {}),
+        additionalDmgBonus: partyHpBonusForHit(hit.partyHpDamageBonus),
         enemyModifiers,
         reaction: {
           additiveBaseDamageBonus: reaction.additiveBaseDamageBonus,
           amplifyingMultiplier: reaction.amplifyingMultiplier,
         },
       });
+
+      triggerReactionResourceGains(
+        def.id,
+        hit.timestamp,
+        reaction.reactionKinds ?? [],
+      );
 
       timeline.push({
         timestamp: hit.timestamp,
@@ -2268,6 +3316,7 @@ export function simulateRotation(
       if (trackedEnemyHp !== undefined) {
         trackedEnemyHp = Math.max(0, trackedEnemyHp - damage.finalDamage);
       }
+      triggerDamageResourceGains(def.id, hit.timestamp, effectiveElement);
 
       applyEnemyDamage(emitTransformative(
         timeline,
@@ -2291,6 +3340,35 @@ export function simulateRotation(
         enemyModifiers,
       );
 
+      if (action.actionType === "skill") {
+        applyEnemyDamage(evaluateTriggers(
+          "onSkillHit",
+          hit.timestamp,
+          activeTriggers,
+          states,
+          activeInfusions,
+          castSnapshot,
+          hitEnemy,
+          runtimeConfig(),
+          timeline,
+          enemyAuras,
+          tickQueue,
+          runtimeBuffs,
+          activeCharacterId,
+          (sourceCharacterId, timestamp, ability) =>
+            processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
+          (sourceCharacterId, timestamp, element) =>
+            triggerDamageResourceGains(sourceCharacterId, timestamp, element),
+          (sourceCharacterId, timestamp, reactionKinds) =>
+            triggerReactionResourceGains(sourceCharacterId, timestamp, reactionKinds),
+          (change, sourceCharacterId, timestamp) =>
+            applyHealthChange(change, sourceCharacterId, timestamp),
+          (bonus) => partyHpBonusForHit(bonus),
+          def.id,
+          ability.id,
+        ));
+      }
+
       applyEnemyDamage(evaluateTriggers(
         "onDamageDealt",
         hit.timestamp,
@@ -2299,7 +3377,7 @@ export function simulateRotation(
         activeInfusions,
         castSnapshot,
         hitEnemy,
-        config,
+        runtimeConfig(),
         timeline,
         enemyAuras,
         tickQueue,
@@ -2307,6 +3385,19 @@ export function simulateRotation(
         activeCharacterId,
         (sourceCharacterId, timestamp, ability) =>
           processParticleEmission(sourceCharacterId, timestamp, ability, activeCharacterId),
+        (sourceCharacterId, timestamp, element) =>
+          triggerDamageResourceGains(sourceCharacterId, timestamp, element),
+        (sourceCharacterId, timestamp, reactionKinds) =>
+          triggerReactionResourceGains(sourceCharacterId, timestamp, reactionKinds),
+        (change, sourceCharacterId, timestamp) =>
+          applyHealthChange(change, sourceCharacterId, timestamp),
+        (bonus) => partyHpBonusForHit(bonus),
+        def.id,
+        ability.id,
+        effectiveDamageType,
+        effectiveElement,
+        (healing, sourceCharacterId, timestamp) =>
+          scheduleTriggeredHealing(healing, sourceCharacterId, timestamp),
       ));
       triggerArtifactResources(
         "damageDealt",
@@ -2349,6 +3440,10 @@ export function simulateRotation(
     // consuming its first proc on the hit that created it.
     if (ability.triggers) {
       for (const trig of ability.triggers) {
+        if (
+          trig.trigger === "onSkillHit" ||
+          (action.actionType === "burst" && trig.trigger === "onBurstCast")
+        ) continue;
         activeTriggers.push({
           trigger: trig,
           startTime: clock,
@@ -2403,7 +3498,18 @@ export function simulateRotation(
     // boost can move it. Same bag as the multipliers, so the two cannot
     // disagree about which level this cast ran at.
     const cd = cooldownFor(genericDef, ability, talentLevelBoosts);
-    startCooldown(state.cooldowns, ability.id, clock, cd);
+    const cooldownStart = ability.cooldownStartsAfterStance && ability.stance !== undefined
+      ? clock + ability.stance.durationSeconds
+      : clock;
+    if (ability.charges === undefined) {
+      startCooldown(state.cooldowns, ability.id, cooldownStart, cd);
+    } else {
+      // Charged abilities use one shared cooldown per spent charge. A second
+      // charge remains usable immediately, while each spent charge returns at
+      // the resolved cooldown boundary.
+      state.abilityCharges ??= createAbilityChargeState(allAbilities(genericDef));
+      consumeAbilityCharge(state.abilityCharges, ability.id, cooldownStart, cd);
+    }
 
     // Gambler-style reset happens after the defeated hit's cooldown is
     // recorded, so the reset cannot be overwritten by this cast's normal
@@ -2445,6 +3551,7 @@ export function simulateRotation(
       );
     }
 
+    consumeReplacementResource(state, ability, action.actionType, clock + appliedCastTime);
     clock += appliedCastTime;
   }
 
@@ -2470,8 +3577,10 @@ export function simulateRotation(
     }
   }
   processArtifactEvents(horizon);
+  processStanceResourceDrains(horizon);
   processIntervalTriggers(horizon);
   applyEnemyDamage(drainReactionTicks(tickQueue, enemyAuras, enemy, horizon, timeline));
+  refreshPartyMaxHp(clock);
 
   // Ocean-Hued Clam's stored healing is an independent, mitigation-free
   // damage instance. A single team-wide foam is sufficient here: the data

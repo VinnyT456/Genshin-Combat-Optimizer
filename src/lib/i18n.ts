@@ -138,7 +138,7 @@ export const CHARACTER_NAME_ZH: Record<string, string> = {
   sandrone: "桑多涅",
   skirk: "丝柯克",
   lohen: "洛恩",
-  escoffier: "埃斯科菲耶",
+  escoffier: "爱可菲",
   odette: "奥黛特",
 
   // Traveler 旅行者
@@ -282,7 +282,7 @@ export const CHARACTER_ENGLISH_TO_ZH: Record<string, string> = {
   "Sandrone": "桑多涅",
   "Skirk": "丝柯克",
   "Lohen": "洛恩",
-  "Escoffier": "埃斯科菲耶",
+  "Escoffier": "爱可菲",
   "Odette": "奥黛特",
 
   "Traveler": "旅行者",

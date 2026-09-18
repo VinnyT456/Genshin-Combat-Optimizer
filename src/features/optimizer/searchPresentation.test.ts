@@ -9,6 +9,7 @@ import {
   improvementTone,
   objectiveLabel,
   searchEffortLabel,
+  searchStatusLabel,
 } from "./searchPresentation";
 import {
   SEARCH_BUDGETS,
@@ -160,5 +161,12 @@ describe("searchEffortLabel", () => {
     expect(label).toContain("12");
     expect(label).toContain("340");
     expect(label).toContain("20");
+  });
+});
+
+describe("search status labels", () => {
+  it("does not describe an empty completed search as idle", () => {
+    expect(searchStatusLabel("empty")).toBe("搜索已完成，但没有返回候选。");
+    expect(searchStatusLabel("empty")).not.toBe(searchStatusLabel("idle"));
   });
 });

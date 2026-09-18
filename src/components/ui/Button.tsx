@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/components/ui/cn";
 import { DISABLED, FOCUS_RING, TRANSITION_COLORS } from "@/components/ui/tokens";
 
@@ -34,16 +34,20 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
  * are responsible for rendering an adjacent visible reason — see
  * DESIGN-SYSTEM "Interaction states".
  */
-export function Button({
-  variant = "secondary",
-  size = "md",
-  className,
-  type = "button",
-  children,
-  ...rest
-}: Props) {
+export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
+  {
+    variant = "secondary",
+    size = "md",
+    className,
+    type = "button",
+    children,
+    ...rest
+  },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type={type}
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-sm font-medium active:translate-y-px",
@@ -60,4 +64,4 @@ export function Button({
       {children}
     </button>
   );
-}
+});

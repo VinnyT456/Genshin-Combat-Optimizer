@@ -138,6 +138,30 @@ describe("resolver — application order", () => {
     expect(result.dmgBonus).toBeCloseTo(0.1, 10);
   });
 
+  it("adds base damage multiplier buffs to the identity multiplier", () => {
+    const result = foldBuffsIntoStats(
+      stats({ baseDmgMultiplier: { normal: 1.5 } }),
+      active([
+        { stat: "baseDmgMultiplier", value: 0.1, damageType: "normal" },
+        { stat: "baseDmgMultiplier", value: 0.1, damageType: "normal" },
+        { stat: "baseDmgMultiplier", value: 0.5, damageType: "normal" },
+      ]),
+    );
+
+    expect(result.baseDmgMultiplier?.normal).toBeCloseTo(2.2, 10);
+    expect(result.baseDmgMultiplier?.burst).toBeUndefined();
+  });
+
+  it("does not guess a damage channel for a malformed base multiplier", () => {
+    const { stats: result, diagnostics } = foldBuffsIntoStatsWithDiagnostics(
+      stats(),
+      active([{ stat: "baseDmgMultiplier", value: 0.5 }]),
+    );
+
+    expect(result.baseDmgMultiplier).toBeUndefined();
+    expect(diagnostics.skippedKeyedModifiers).toContain("baseDmgMultiplier");
+  });
+
   it("merges elemental DMG% per element onto the existing map", () => {
     const result = foldBuffsIntoStats(
       stats(),

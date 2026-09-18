@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CharacterDefinition, Rotation } from "@/types";
 import { characters } from "@/game-data";
+import { findCharacter } from "@/game-data/characters/registry";
+import { toWebsiteCharacter } from "@/features/team-builder/rosterModel";
 import {
   DEFAULT_EDITOR_SWAP_COST_SECONDS,
   actionDisplayLabel,
@@ -11,6 +13,7 @@ import {
   characterDisplayLabel,
   clampSelection,
   deleteAction,
+  describeAction,
   duplicateAction,
   indexAfterNormalize,
   insertAction,
@@ -22,6 +25,8 @@ import {
   normalizeSwaps,
   rowTimings,
   selectionAfterDelete,
+  skillInputVariantsFor,
+  skillVariantLabel,
   summarizeRotation,
 } from "./rotationEditing";
 
@@ -33,6 +38,7 @@ function require_(id: string): CharacterDefinition {
 
 const bennett = require_("bennett");
 const xiangling = require_("xiangling");
+const bennettWithKit = toWebsiteCharacter(findCharacter("bennett")!);
 const byId = new Map<string, CharacterDefinition>([
   [bennett.id, bennett],
   [xiangling.id, xiangling],
@@ -48,6 +54,23 @@ describe("RotationEditor Chinese presentation labels", () => {
 
   it("uses a Chinese fallback when an action references no team character", () => {
     expect(characterDisplayLabel(null)).toBe("未知角色");
+  });
+
+  it("exposes Bennett's tap and hold inputs from the lossless kit", () => {
+    expect(skillInputVariantsFor(bennettWithKit)).toEqual(["tap", "hold"]);
+    expect(skillVariantLabel("tap")).toBe("点按");
+    expect(skillVariantLabel("hold")).toBe("长按");
+  });
+
+  it("persists the selected hold input in the authored action", () => {
+    const result = insertAction([], 0, bennettWithKit, "skill", "hold");
+    expect(result.rotation[0]).toMatchObject({
+      characterId: "bennett",
+      actionType: "skill",
+      skillVariant: "hold",
+    });
+    expect(result.rotation[0]?.abilityId).toBeUndefined();
+    expect(describeAction(result.rotation[0]!, bennettWithKit)).toContain("（长按）");
   });
 });
 
